@@ -1,0 +1,189 @@
+# Shipwright — local dev infrastructure (backbone only; app services run from source or their own Dockerfiles).
+# Ports & images are pinned to docs/VERSIONS.md. Variable names mirror the repo-root .env.example;
+# every ${VAR:-default} carries the .env.example dev default so `docker compose up` works out of the box.
+#
+# Bring up:   pnpm infra:up      (== docker compose -f deploy/docker/docker-compose.yml up -d)
+# Tear down:  pnpm infra:down
+# Override:   export the vars, or run with `--env-file ../../.env`.
+#
+# NOTE: the postgres init mounts (../../db/migrations/*.sql, ../../db/seeds/dev_seed.sql) are produced
+# by the `db` subtree. They must exist before first boot — Postgres runs them ONCE on an empty volume
+# (alphabetical order, so migrations precede the seed). Re-seed with `docker compose down -v`.
+
+name: foundry
+
+networks:
+  foundry:
+    name: foundry
+
+volumes:
+  pgdata:
+  redisdata:
+  clickhouse_data:
+  minio_data:
+
+services:
+  # ---- PostgreSQL 16 + pgvector (system of record; also hosts Temporal's own databases) ----
+  postgres:
+    image: pgvector/pgvector:pg16
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-foundry}
+      POSTGRES_USER: ${POSTGRES_USER:-foundry}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-foundry_dev}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      # Auto-init + seed a fresh database (runs only when the data volume is empty, in filename order).
+      - ../../db/migrations/0001_init.sql:/docker-entrypoint-initdb.d/0001_init.sql:ro
+      - ../../db/migrations/0002_functions.sql:/docker-entrypoint-initdb.d/0002_functions.sql:ro
+      - ../../db/seeds/dev_seed.sql:/docker-entrypoint-initdb.d/0003_dev_seed.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    networks: [foundry]
+
+  # ---- Redis 7 (event bus / pub-sub / cache) ----
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "6379:6379"
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+    networks: [foundry]
+
+  # ---- Temporal server (auto-setup: creates schema + `default` namespace in Postgres) ----
+  temporal:
+    image: temporalio/auto-setup:latest
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DB: postgres12                     # schema plugin name for PostgreSQL 12+ (works on PG16)
+      DB_PORT: 5432
+      POSTGRES_SEEDS: postgres           # hostname of the postgres service
+      POSTGRES_USER: ${POSTGRES_USER:-foundry}
+      POSTGRES_PWD: ${POSTGRES_PASSWORD:-foundry_dev}
+      ENABLE_ES: "false"                 # visibility store = Postgres (no Elasticsearch locally)
+    ports:
+      - "7233:7233"
+    healthcheck:
+      test: ["CMD", "tctl", "--address", "temporal:7233", "cluster", "health"]
+      interval: 15s
+      timeout: 10s
+      retries: 15
+      start_period: 30s
+    networks: [foundry]
+
+  # ---- Temporal Web UI ----
+  temporal-ui:
+    image: temporalio/ui:latest
+    restart: unless-stopped
+    depends_on:
+      temporal:
+        condition: service_started
+    environment:
+      TEMPORAL_ADDRESS: temporal:7233
+      TEMPORAL_CORS_ORIGINS: http://localhost:8088
+    ports:
+      - "8088:8080"
+    networks: [foundry]
+
+  # ---- ClickHouse 24 (usage / event analytics) ----
+  clickhouse:
+    image: clickhouse/clickhouse-server:24-alpine
+    restart: unless-stopped
+    environment:
+      CLICKHOUSE_DB: ${CLICKHOUSE_DB:-foundry}
+    ports:
+      - "8123:8123"                      # HTTP
+      - "9000:9000"                      # native protocol
+    volumes:
+      - clickhouse_data:/var/lib/clickhouse
+    ulimits:
+      nofile:
+        soft: 262144
+        hard: 262144
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8123/ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
+    networks: [foundry]
+
+  # ---- MinIO (S3-compatible object store) ----
+  minio:
+    image: minio/minio
+    restart: unless-stopped
+    command: server /data --address ":9100" --console-address ":9101"
+    environment:
+      MINIO_ROOT_USER: ${S3_ACCESS_KEY:-foundry}
+      MINIO_ROOT_PASSWORD: ${S3_SECRET_KEY:-foundry_dev}
+    ports:
+      - "9100:9100"                      # S3 API
+      - "9101:9101"                      # web console
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9100/minio/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
+    networks: [foundry]
+
+  # ---- one-shot: create the artifacts bucket, then exit ----
+  createbuckets:
+    image: minio/mc
+    depends_on:
+      minio:
+        condition: service_healthy
+    restart: "no"
+    environment:
+      S3_ACCESS_KEY: ${S3_ACCESS_KEY:-foundry}
+      S3_SECRET_KEY: ${S3_SECRET_KEY:-foundry_dev}
+      S3_BUCKET: ${S3_BUCKET:-foundry-artifacts}
+    entrypoint: >
+      /bin/sh -c "
+      until /usr/bin/mc alias set local http://minio:9100 $$S3_ACCESS_KEY $$S3_SECRET_KEY; do
+        echo 'waiting for minio...'; sleep 1;
+      done;
+      /usr/bin/mc mb --ignore-existing local/$$S3_BUCKET;
+      echo 'bucket ready: '$$S3_BUCKET;
+      exit 0;
+      "
+    networks: [foundry]
+
+  # ---- Vault (dev mode — in-memory, auto-unsealed, root token from .env) ----
+  vault:
+    image: hashicorp/vault:latest
+    restart: unless-stopped
+    command: server -dev
+    cap_add:
+      - IPC_LOCK
+    environment:
+      VAULT_DEV_ROOT_TOKEN_ID: ${VAULT_TOKEN:-foundry-dev-root}
+      VAULT_DEV_LISTEN_ADDRESS: 0.0.0.0:8200
+      VAULT_ADDR: http://127.0.0.1:8200  # container-local, for the `vault status` healthcheck CLI
+    ports:
+      - "8200:8200"
+    healthcheck:
+      test: ["CMD", "vault", "status"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    networks: [foundry]

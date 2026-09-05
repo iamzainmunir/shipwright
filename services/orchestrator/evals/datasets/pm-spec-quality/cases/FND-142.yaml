@@ -1,0 +1,14 @@
+id: FND-142
+input:
+  ticket:
+    source: jira
+    ext: NPD-11402
+    title: "Scope the surcharge to the caller's tenant"
+    body: >-
+      A by-id read used the URL id, not the caller's tenant. The spec must cover same-tenant
+      reads, cross-tenant 404s, and body/URL id mismatches on write.
+expected:
+  programmatic:
+    minStories: 3
+    mustCoverTags: [tenant, "404", mismatch]
+labels: { difficulty: medium, category: security-fix }

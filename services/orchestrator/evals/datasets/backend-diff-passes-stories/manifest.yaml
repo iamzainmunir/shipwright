@@ -1,0 +1,12 @@
+# EvalSuite (Canon §13.12) — the strongest, fully objective backend eval (plan 12 §5.4):
+# the agent's diff must apply and the acceptance tests must pass in a sandbox.
+id: backend-diff-passes-stories
+version: 1
+target: { role: backend, phase: build.api }
+budget:
+  max_cost_cents_per_case: 50
+  max_latency_ms_p50: 60000
+gate:
+  metric: overall_score
+  min: 0.8
+  samples: 1

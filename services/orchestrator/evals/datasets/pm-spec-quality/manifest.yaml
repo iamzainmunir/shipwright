@@ -1,0 +1,12 @@
+# EvalSuite (Canon §13.12) — PM intake→spec quality (plan 12 §5.1). Programmatic floor:
+# a spec header, at least N acceptance stories, and coverage of the required tags.
+id: pm-spec-quality
+version: 1
+target: { role: pm, phase: spec }
+budget:
+  max_cost_cents_per_case: 20
+  max_latency_ms_p50: 45000
+gate:
+  metric: overall_score
+  min: 0.8
+  samples: 1

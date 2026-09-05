@@ -1,0 +1,10 @@
+packages:
+  - "apps/*"
+  - "packages/*"
+
+# pnpm 11 build-script governance. Native postinstall builds are disabled for reproducible,
+# offline-friendly installs. Next.js uses sharp for image optimization at runtime if present;
+# it is not required to build. unrs-resolver ships a prebuilt binary; its build script is skipped.
+allowBuilds:
+  sharp: false
+  unrs-resolver: false

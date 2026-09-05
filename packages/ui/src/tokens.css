@@ -1,0 +1,137 @@
+/* =============================================================
+   @foundry/ui — Design tokens
+   Ported 1:1 from the original design mockup.
+   Dark-first "mission control" aesthetic; premium violet -> cyan palette.
+
+   Theming model (light-first per product owner's preference):
+     - Default / no attribute .............. LIGHT (the default the user asked for)
+     - :root[data-theme="light"] ........... LIGHT (explicit)
+     - :root[data-theme="dark"] ............ DARK  (explicit opt-in)
+     - :root[data-theme="system"] .......... follows prefers-color-scheme (dark only when OS is dark)
+   Every color in the design system references one of these tokens, so a theme change is a
+   token swap and nothing hard-codes a color.
+   ============================================================= */
+
+/* ---------- Shared tokens (theme-independent) ---------- */
+:root {
+  --brand:         #7c5cff;
+  --brand-2:       #9d7bff;
+  --brand-ink:     #ffffff;
+  --cyan:          #34d3ee;
+  --green:         #3ad29f;
+  --amber:         #f6c454;
+  --red:           #ff6b7d;
+  --pink:          #ff7ac6;
+  --blue:          #5b8cff;
+
+  --grad:      linear-gradient(135deg, #7c5cff 0%, #5b8cff 55%, #34d3ee 120%);
+
+  --radius:    16px;
+  --radius-sm: 10px;
+  --radius-xs: 8px;
+  --ring:      0 0 0 3px rgba(124, 92, 255, .28);
+
+  --sidebar-w: 256px;
+  --topbar-h:  64px;
+
+  --font:    'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --display: 'Sora', var(--font);
+  --mono:    'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+}
+
+/* ---------- Light — DEFAULT (bare :root) + explicit ---------- */
+:root,
+:root[data-theme="light"] {
+  --bg:            #f4f5fa;
+  --bg-2:          #eef0f7;
+  --panel:         #ffffff;
+  --panel-2:       #f7f8fc;
+  --elev:          #ffffff;
+  --line:          rgba(16, 20, 40, .09);
+  --line-2:        rgba(16, 20, 40, .16);
+  --text:          #12162a;
+  --muted:         #59617a;
+  --faint:         #8b93aa;
+  --grad-soft: linear-gradient(135deg, rgba(124, 92, 255, .12), rgba(52, 211, 238, .08));
+  --console-bg: #0c0e14;
+  --shadow:    0 24px 50px -28px rgba(30, 40, 90, .28);
+  --shadow-sm: 0 10px 24px -16px rgba(30, 40, 90, .22);
+}
+
+/* ---------- Dark — explicit opt-in ---------- */
+:root[data-theme="dark"] {
+  --bg:            #08090d;
+  --bg-2:          #0c0e14;
+  --panel:         #111420;
+  --panel-2:       #151928;
+  --elev:          #1a1f30;
+  --line:          rgba(255, 255, 255, .07);
+  --line-2:        rgba(255, 255, 255, .12);
+  --text:          #eceef5;
+  --muted:         #9aa2b8;
+  --faint:         #656d84;
+  --grad-soft: linear-gradient(135deg, rgba(124, 92, 255, .18), rgba(52, 211, 238, .10));
+  --console-bg: #06070b;
+  --shadow:    0 20px 50px -20px rgba(0, 0, 0, .65);
+  --shadow-sm: 0 8px 24px -12px rgba(0, 0, 0, .6);
+}
+
+/* ---------- System — dark only when the OS prefers dark ---------- */
+@media (prefers-color-scheme: dark) {
+  :root[data-theme="system"] {
+    --bg:            #08090d;
+    --bg-2:          #0c0e14;
+    --panel:         #111420;
+    --panel-2:       #151928;
+    --elev:          #1a1f30;
+    --line:          rgba(255, 255, 255, .07);
+    --line-2:        rgba(255, 255, 255, .12);
+    --text:          #eceef5;
+    --muted:         #9aa2b8;
+    --faint:         #656d84;
+    --grad-soft: linear-gradient(135deg, rgba(124, 92, 255, .18), rgba(52, 211, 238, .10));
+    --console-bg: #06070b;
+    --shadow:    0 20px 50px -20px rgba(0, 0, 0, .65);
+    --shadow-sm: 0 8px 24px -12px rgba(0, 0, 0, .6);
+  }
+}
+
+/* =============================================================
+   Tailwind v4 bridge (09-frontend.md A8)
+   Maps tokens to Tailwind's theme so utilities like `bg-panel`,
+   `text-muted`, `rounded-card`, `font-display` resolve to tokens.
+   Requires Tailwind v4 (`@import "tailwindcss"`) in the consumer.
+   ============================================================= */
+@theme inline {
+  --color-bg:        var(--bg);
+  --color-bg-2:      var(--bg-2);
+  --color-panel:     var(--panel);
+  --color-panel-2:   var(--panel-2);
+  --color-elev:      var(--elev);
+  --color-line:      var(--line);
+  --color-line-2:    var(--line-2);
+  --color-text:      var(--text);
+  --color-muted:     var(--muted);
+  --color-faint:     var(--faint);
+  --color-console:   var(--console-bg);
+
+  --color-brand:     var(--brand);
+  --color-brand-2:   var(--brand-2);
+  --color-cyan:      var(--cyan);
+  --color-green:     var(--green);
+  --color-amber:     var(--amber);
+  --color-red:       var(--red);
+  --color-pink:      var(--pink);
+  --color-blue:      var(--blue);
+
+  --radius-card: var(--radius);
+  --radius-sm:   var(--radius-sm);
+  --radius-xs:   var(--radius-xs);
+
+  --shadow-card:    var(--shadow);
+  --shadow-card-sm: var(--shadow-sm);
+
+  --font-sans:    var(--font);
+  --font-display: var(--display);
+  --font-mono:    var(--mono);
+}

@@ -1,0 +1,65 @@
+[project]
+name = "foundry-orchestrator"
+version = "0.1.0"
+description = "Shipwright Orchestrator — FastAPI public API + agent engine + Temporal workflows (Canon §4)."
+requires-python = ">=3.13"
+readme = "README.md"
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.32",
+    "pydantic>=2.9",
+    "pydantic-settings>=2.5",
+    "sqlalchemy>=2.0",
+    "asyncpg>=0.30",
+    "alembic>=1.14",
+    "redis>=5.2",
+    "httpx>=0.28",
+    "structlog>=24.4",
+    "foundry-core[tracing]",
+    "opentelemetry-instrumentation-fastapi>=0.50b0",
+    "python-multipart>=0.0.32",
+    # --- v2 enhancement stack (plan 03-package-stack.md) ---
+    "langgraph>=1.0,<2",                      # run graph: Send fan-out, interrupts, checkpoints
+    "langgraph-checkpoint-postgres>=2.0",     # AsyncPostgresSaver — restart-resume (thread=run)
+    "psycopg[binary]>=3.1",                   # required by the postgres checkpointer
+    "litellm>=1.60",                          # provider router: per-agent chains, cost tracking
+    "tenacity>=9",                            # system-edge retries (Jira HTTP, git push) ONLY
+    "atlassian-python-api>=4.0",              # Jira Cloud REST v3 mirror (thin facade over it)
+    "playwright>=1.49",                       # QA evidence: screenshots / video / trace
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8",
+    "pytest-asyncio>=0.24",
+    "ruff>=0.8",
+    "mypy>=1.13",
+    "pyyaml>=6",  # eval-suite manifests/cases (evals/ harness — plan 12 §5)
+]
+
+# The orchestrator is an application (import package `app`), not a distributed library,
+# so uv should install its dependencies + editable sources without building the project itself.
+[tool.uv]
+package = false
+
+[tool.uv.sources]
+foundry-core = { path = "../../libs/py-core", editable = true }
+
+[tool.ruff]
+line-length = 120
+target-version = "py313"
+src = ["app", "tests", "evals"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "ASYNC"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.mypy]
+python_version = "3.13"
+plugins = ["pydantic.mypy"]
+ignore_missing_imports = true
+warn_unused_ignores = true

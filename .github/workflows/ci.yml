@@ -1,0 +1,247 @@
+name: ci
+
+# Shipwright monorepo CI. One workflow, one job per language toolchain so a red
+# check points straight at the culprit. Versions/ports come from docs/VERSIONS.md.
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Only the newest run per ref survives; older in-flight runs are cancelled.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  # apps/web (@foundry/web) — Next.js 15 / React 19 / TS 5.7 on Node 24 + pnpm 11.
+  web:
+    name: web (@foundry/web)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Installs the pnpm version pinned by root package.json `packageManager` (pnpm@11).
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc # -> 24
+
+      # Cache the pnpm content-addressable store. Keyed on manifests so it is
+      # valid even before a lockfile is committed; restore-keys give a warm start.
+      - name: Resolve pnpm store path
+        id: pnpm-store
+        shell: bash
+        run: echo "dir=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
+      - name: Cache pnpm store
+        uses: actions/cache@v4
+        with:
+          path: ${{ steps.pnpm-store.outputs.dir }}
+          key: pnpm-${{ runner.os }}-${{ hashFiles('**/pnpm-lock.yaml', '**/package.json') }}
+          restore-keys: |
+            pnpm-${{ runner.os }}-
+
+      - name: Install
+        run: pnpm install --frozen-lockfile=false
+
+      - name: Lint
+        run: pnpm --filter @foundry/web lint
+      - name: Typecheck
+        run: pnpm --filter @foundry/web typecheck
+      - name: Build
+        run: pnpm --filter @foundry/web build
+
+  # services/orchestrator — Python 3.13 / FastAPI / Pydantic v2, managed by uv.
+  # Depends on libs/py-core (foundry-core) via a path source; uv resolves it.
+  orchestrator:
+    name: orchestrator
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: services/orchestrator
+    # Postgres is only needed for the Alembic migration gate below; pytest uses the
+    # in-memory store and needs no database.
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: foundry
+          POSTGRES_PASSWORD: foundry_dev
+          POSTGRES_DB: foundry
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U foundry -d foundry"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up uv + Python 3.13
+        uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.13"
+          enable-cache: true
+      - name: Sync deps
+        run: uv sync
+      - name: Ruff
+        run: uv run ruff check .
+      - name: Pytest
+        run: uv run pytest
+      # Migration gate (plan 11 §11.4): migrations apply cleanly, the ORM has no un-migrated
+      # drift (`alembic check`), and the schema is reversible (downgrade → re-upgrade).
+      - name: Alembic migration gate
+        env:
+          DATABASE_URL: postgresql+asyncpg://foundry:foundry_dev@localhost:5432/foundry
+        run: |
+          set -euo pipefail
+          uv run alembic upgrade head
+          uv run alembic check
+          uv run alembic downgrade base
+          uv run alembic upgrade head
+      # RLS is raw SQL invisible to `alembic check`, so assert its EFFECT directly: the FORCE
+      # flag + ws_isolation policies exist on all 10 tenant tables and the sequence starts >=151
+      # (catalog), and a non-superuser genuinely cannot read or write across tenants (runtime).
+      - name: RLS & sequence gate
+        env:
+          PGHOST: localhost
+          PGPORT: "5432"
+          PGUSER: foundry
+          PGPASSWORD: foundry_dev
+          PGDATABASE: foundry
+        run: |
+          set -euo pipefail
+          psql -v ON_ERROR_STOP=1 <<'SQL'
+          DO $$
+          DECLARE forced int; policies int; seqstart bigint;
+          BEGIN
+            SELECT count(*) INTO forced FROM pg_class WHERE relkind='r' AND relforcerowsecurity;
+            IF forced <> 10 THEN RAISE EXCEPTION 'expected 10 FORCE-RLS tables, found %', forced; END IF;
+            SELECT count(*) INTO policies FROM pg_policies
+              WHERE policyname='ws_isolation' AND qual LIKE '%app.workspace_id%' AND with_check LIKE '%app.workspace_id%';
+            IF policies <> 10 THEN RAISE EXCEPTION 'expected 10 ws_isolation policies, found %', policies; END IF;
+            SELECT start_value INTO seqstart FROM pg_sequences WHERE sequencename='mission_key_seq';
+            IF seqstart IS NULL OR seqstart < 151 THEN RAISE EXCEPTION 'mission_key_seq missing or start<151 (got %)', seqstart; END IF;
+          END $$;
+          DROP ROLE IF EXISTS rls_probe;
+          CREATE ROLE rls_probe LOGIN PASSWORD 'probe' NOSUPERUSER;
+          GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO rls_probe;
+          GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO rls_probe;
+          SQL
+          PGPASSWORD=probe psql -U rls_probe -h localhost -d foundry -v ON_ERROR_STOP=1 <<'SQL'
+          SET app.workspace_id = 'WS_A';
+          INSERT INTO missions (id,key,workspace_id,title,source,priority,stage,autonomy,progress,labels,is_blocked)
+            VALUES ('01RLSPROBEAAAAAAAAAAAAAAAA','RLS-PROBE-A','WS_A','probe','manual','p2','backlog','supervised',0,'[]',false);
+          SET app.workspace_id = 'WS_B';
+          DO $$ BEGIN
+            IF (SELECT count(*) FROM missions WHERE key='RLS-PROBE-A') <> 0 THEN RAISE EXCEPTION 'RLS LEAK: WS_B sees WS_A row'; END IF;
+          END $$;
+          DO $$ BEGIN
+            BEGIN
+              INSERT INTO missions (id,key,workspace_id,title,source,priority,stage,autonomy,progress,labels,is_blocked)
+                VALUES ('01RLSPROBEBBBBBBBBBBBBBBBB','RLS-PROBE-B','WS_A','x','manual','p2','backlog','supervised',0,'[]',false);
+              RAISE EXCEPTION 'RLS WITH CHECK FAILED: cross-tenant insert allowed';
+            EXCEPTION WHEN insufficient_privilege THEN NULL;
+            END;
+          END $$;
+          SQL
+      # AI eval gate (plan 12 §5.7): each suite's mean must clear its manifest gate, or the
+      # merge is blocked. Runs offline against the deterministic provider, writes JUnit XML.
+      - name: AI eval gate
+        run: uv run python -m evals.harness --suite all --mode gate --junit eval-results
+      - name: Upload eval report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: eval-results
+          path: services/orchestrator/eval-results/
+          if-no-files-found: ignore
+
+  # libs/py-core — the shared Python distribution (import package: foundry_core).
+  py-core:
+    name: py-core
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: libs/py-core
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up uv + Python 3.13
+        uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.13"
+          enable-cache: true
+      - name: Sync deps
+        run: uv sync
+      - name: Pytest
+        run: uv run pytest
+
+  # services/ingester — Go 1.24 webhook ingester.
+  ingester:
+    name: ingester
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: services/ingester
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.24"
+          cache-dependency-path: services/ingester/go.sum
+      - name: Build
+        run: go build ./...
+      - name: Vet
+        run: go vet ./...
+      - name: Test
+        run: go test ./...
+
+  # db — prove the SQL migrations apply against a real Postgres 16 + pgvector.
+  db:
+    name: db (migrations)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: foundry
+          POSTGRES_PASSWORD: foundry_dev
+          POSTGRES_DB: foundry
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U foundry -d foundry"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      PGHOST: localhost
+      PGPORT: "5432"
+      PGUSER: foundry
+      PGPASSWORD: foundry_dev
+      PGDATABASE: foundry
+    steps:
+      - uses: actions/checkout@v4
+      # psql ships preinstalled on ubuntu-latest runners.
+      - name: Enable pgvector
+        run: psql -v ON_ERROR_STOP=1 -c "CREATE EXTENSION IF NOT EXISTS vector;"
+      - name: Apply migrations
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -t files < <(find db/migrations -type f -name '*.sql' | sort)
+          if [ "${#files[@]}" -eq 0 ]; then
+            echo "No .sql migrations in db/migrations/ yet — extension check passed, nothing to apply."
+            exit 0
+          fi
+          for f in "${files[@]}"; do
+            echo "==> applying $f"
+            psql -v ON_ERROR_STOP=1 -f "$f"
+          done
+          echo "All ${#files[@]} migration(s) applied cleanly."

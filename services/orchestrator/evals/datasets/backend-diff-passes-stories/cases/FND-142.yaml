@@ -1,0 +1,13 @@
+id: FND-142
+input:
+  ticket:
+    source: jira
+    ext: NPD-11402
+    title: "Scope the surcharge to the caller's tenant"
+    body: >-
+      A by-id read used the URL id, not the caller's tenant; add tenant scoping and a
+      regression test so a caller can never read another workspace's record.
+expected:
+  programmatic:
+    mustChangeFile: src/handler.py
+labels: { difficulty: medium, category: security-fix }

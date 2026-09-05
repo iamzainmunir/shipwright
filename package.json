@@ -1,0 +1,25 @@
+{
+  "name": "shipwright",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Shipwright — autonomous AI engineering org (monorepo root)",
+  "packageManager": "pnpm@11.0.9",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "dev": "turbo run dev --parallel",
+    "build": "turbo run build",
+    "lint": "turbo run lint",
+    "typecheck": "turbo run typecheck",
+    "test": "turbo run test",
+    "format": "prettier --write \"**/*.{ts,tsx,js,jsx,json,md,css}\"",
+    "infra:up": "docker compose -f deploy/docker/docker-compose.yml up -d",
+    "infra:down": "docker compose -f deploy/docker/docker-compose.yml down"
+  },
+  "devDependencies": {
+    "prettier": "^3.4.2",
+    "turbo": "^2.3.3",
+    "typescript": "^5.7.3"
+  }
+}

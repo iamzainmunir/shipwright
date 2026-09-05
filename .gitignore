@@ -1,0 +1,39 @@
+# Node / JS
+node_modules/
+.next/
+out/
+dist/
+.turbo/
+*.tsbuildinfo
+.pnpm-store/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+
+# Go
+/services/ingester/bin/
+/services/ingester/ingester
+
+# Env & secrets
+.env
+.env.local
+*.local
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/*
+!.vscode/extensions.json
+
+# Data / logs
+*.log
+/tmp/
+/data/
+
+# internal build tracker (not for public repo)
+/progress.md

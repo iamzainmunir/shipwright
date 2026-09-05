@@ -1,0 +1,25 @@
+{
+  "name": "@foundry/ui",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Shipwright shared design system — tokens + React primitives (source-only, consumed via Next transpilePackages).",
+  "exports": {
+    ".": "./src/index.ts",
+    "./tokens.css": "./src/tokens.css"
+  },
+  "files": [
+    "src"
+  ],
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "lint": "tsc --noEmit"
+  },
+  "peerDependencies": {
+    "react": "^19"
+  },
+  "devDependencies": {
+    "@types/react": "^19",
+    "typescript": "^5.7"
+  }
+}

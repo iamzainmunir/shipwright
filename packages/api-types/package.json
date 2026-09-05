@@ -1,0 +1,20 @@
+{
+  "name": "@foundry/api-types",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Shipwright shared API TypeScript types (hand-authored seed; later generated from the OpenAPI spec — doc 03).",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "files": [
+    "src"
+  ],
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "lint": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "typescript": "^5.7"
+  }
+}
