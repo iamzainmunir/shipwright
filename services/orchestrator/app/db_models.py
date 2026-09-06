@@ -328,3 +328,8 @@ class AutonomyPolicyRow(Base):
     features: Mapped[dict] = mapped_column(JSON, default=dict)
     mission_key_prefix: Mapped[str] = mapped_column(String(16), default="")
     projects_dir: Mapped[str] = mapped_column(String(512), default="")
+    notify_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    notify_channels: Mapped[dict] = mapped_column(JSON, default=dict)
+    notify_events: Mapped[dict] = mapped_column(JSON, default=dict)
+    notify_email: Mapped[str] = mapped_column(String(320), default="")
+    notify_whatsapp: Mapped[str] = mapped_column(String(32), default="")

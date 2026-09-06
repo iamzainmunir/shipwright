@@ -339,6 +339,8 @@ class RunEngine:
         from .tickets import TicketService
         self._jira = JiraMirror(store)
         self._tickets = TicketService(store, sink=self._jira.on_ticket_event)
+        from .notifier import Notifier
+        self._notifier = Notifier(store)  # email/WhatsApp/Slack on blocker/ship/halt (failure-isolated)
 
     async def _effective_projects_root(self) -> str:
         """Where greenfield apps are built: the workspace's configured ``projects_dir`` (Settings),
@@ -589,6 +591,7 @@ class RunEngine:
             detail=json.dumps({"questions": questions}), created_at=_now(),
         )
         await self.store.add_blocker(blocker)
+        await self._notifier.on_blocker(blocker, mission)
         await self.store.update_step(step_id, status=StepStatus.GATED)
         await self.store.update_run(run_id, status=RunStatus.BLOCKED)
         await self.store.update_mission(mission_id, is_blocked=True)
@@ -752,6 +755,7 @@ class RunEngine:
                     detail=detail, created_at=_now(),
                 )
                 await self.store.add_blocker(reblock)
+                await self._notifier.on_blocker(reblock, mission)
                 if ship_step:
                     await self.store.update_step(ship_step.id, status=StepStatus.GATED)
                 await self.store.update_run(run.id, status=RunStatus.BLOCKED)
@@ -767,6 +771,7 @@ class RunEngine:
             mission_id, stage=MissionStage.SHIPPED, progress=100, is_blocked=False
         )
         await self._tickets.on_shipped(shipped)  # board: close the Epic + Stories FIRST (never gated)
+        await self._notifier.on_completed(shipped)  # email/WhatsApp/Slack (failure-isolated)
         await self._bump_agent_stat(AgentRoleKey.DEVOPS, "shipped", shipped.workspace_id, mission=shipped)
         await self._reset_agents_idle(shipped.workspace_id)
         await self._persist_memory(shipped)  # the org remembers what it shipped
@@ -1251,6 +1256,7 @@ class RunEngine:
                          f"🙋 Needs your attention: {message}",
                          payload={"kind": "needs.user", "phase": "review"})
         await self._fail(run_id, mission_id, message)
+        await self._notifier.on_failed(mission, message)  # email/WhatsApp/Slack (failure-isolated)
         if (m := await self.store.get_mission(mission_id)) is not None and m.stage is not MissionStage.SHIPPED:
             await self.store.update_mission(mission_id, stage=MissionStage.STOPPED, is_blocked=False)
         return _HALT
@@ -2440,6 +2446,7 @@ class RunEngine:
             detail=detail, created_at=_now(),
         )
         await self.store.add_blocker(blocker)
+        await self._notifier.on_blocker(blocker, mission)
         await self.store.update_step(step_id, status=StepStatus.GATED)
         await self.store.update_run(run_id, status=RunStatus.BLOCKED)
         await self.store.update_mission(mission_id, is_blocked=True)

@@ -498,3 +498,10 @@ class AutonomyPolicy(FoundryModel):
     # User-configurable defaults (empty ⇒ fall back to the global config default):
     mission_key_prefix: str = ""  # e.g. "M" ⇒ M-151; empty ⇒ SHIPWRIGHT_MISSION_PREFIX
     projects_dir: str = ""  # where greenfield apps are built; empty ⇒ ~/ShipwrightProjects
+    # Notifications (opt-in, per-workspace). Provider credentials come from the environment;
+    # only the non-secret preferences (which channels/events, recipient) are stored here.
+    notify_enabled: bool = False
+    notify_channels: dict[str, bool] = Field(default_factory=dict)  # email · whatsapp_twilio · whatsapp_meta · slack
+    notify_events: dict[str, bool] = Field(default_factory=dict)  # blocker · completed · failed · approval
+    notify_email: str = ""  # recipient email address (for the email channel)
+    notify_whatsapp: str = ""  # recipient WhatsApp number, E.164 e.g. +15551234567

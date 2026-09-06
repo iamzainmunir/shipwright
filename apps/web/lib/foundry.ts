@@ -566,6 +566,12 @@ export interface AutonomyPolicy {
   missionKeyPrefix: string;
   /** Directory where greenfield apps are built; empty ⇒ the server default (~/ShipwrightProjects). */
   projectsDir: string;
+  /** Notifications (email / WhatsApp / Slack) — off by default; credentials live server-side. */
+  notifyEnabled: boolean;
+  notifyChannels: Record<string, boolean>; // email · whatsapp_twilio · whatsapp_meta · slack
+  notifyEvents: Record<string, boolean>; // blocker · completed · failed · approval
+  notifyEmail: string;
+  notifyWhatsapp: string;
 }
 
 /** Fields the PATCH /settings endpoint accepts; each is optional (partial update). */
@@ -580,6 +586,11 @@ export type SettingsPatch = Partial<
     | "guardrails"
     | "missionKeyPrefix"
     | "projectsDir"
+    | "notifyEnabled"
+    | "notifyChannels"
+    | "notifyEvents"
+    | "notifyEmail"
+    | "notifyWhatsapp"
   >
 >;
 

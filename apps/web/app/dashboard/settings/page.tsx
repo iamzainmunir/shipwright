@@ -1,7 +1,7 @@
 "use client";
 
 import { Badge, type BadgeTone, Button, Icon, type IconName, cx } from "@foundry/ui";
-import { type ReactNode, useEffect, useId, useState } from "react";
+import { type CSSProperties, type ReactNode, useEffect, useId, useState } from "react";
 import { isApiError } from "@/lib/api";
 import { useToast } from "@/components/toast";
 import {
@@ -27,6 +27,37 @@ const dollarsToCents = (dollars: number) => Math.max(0, Math.round(dollars)) * 1
 const money = (n: number) =>
   `$${n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 const money0 = (n: number) => `$${Math.round(n).toLocaleString("en-US")}`;
+
+const NOTIFY_CHANNELS: { key: string; label: string }[] = [
+  { key: "email", label: "Email" },
+  { key: "whatsapp_twilio", label: "WhatsApp · Twilio" },
+  { key: "whatsapp_meta", label: "WhatsApp · Meta" },
+  { key: "slack", label: "Slack" },
+];
+const NOTIFY_EVENTS: { key: string; label: string }[] = [
+  { key: "blocker", label: "Blocker raised" },
+  { key: "approval", label: "Ready for approval" },
+  { key: "completed", label: "Shipped" },
+  { key: "failed", label: "Halted / failed" },
+];
+const chipStyle = (on: boolean): CSSProperties => ({
+  padding: "6px 12px",
+  borderRadius: 999,
+  border: `1px solid ${on ? "var(--brand)" : "var(--line)"}`,
+  background: on ? "color-mix(in srgb, var(--brand) 16%, transparent)" : "var(--surface)",
+  color: on ? "var(--brand)" : "var(--text)",
+  fontWeight: 600,
+  fontSize: 13,
+  cursor: "pointer",
+});
+const notifyInput: CSSProperties = {
+  width: "100%",
+  padding: "8px 12px",
+  borderRadius: 10,
+  border: "1px solid var(--line)",
+  background: "var(--surface)",
+  color: "var(--text)",
+};
 
 /* ---- per-level presentation copy shown live under the selector ---- */
 interface LevelInfo {
@@ -410,6 +441,11 @@ export default function SettingsPage() {
       guardrails: draft.guardrails,
       missionKeyPrefix: draft.missionKeyPrefix,
       projectsDir: draft.projectsDir,
+      notifyEnabled: draft.notifyEnabled,
+      notifyChannels: draft.notifyChannels,
+      notifyEvents: draft.notifyEvents,
+      notifyEmail: draft.notifyEmail,
+      notifyWhatsapp: draft.notifyWhatsapp,
     };
     try {
       const updated = await updateSettings(body);
@@ -750,6 +786,95 @@ export default function SettingsPage() {
               (<b>~/ShipwrightProjects</b>).
             </span>
           </div>
+        </div>
+      </div>
+
+      {/* Section 4.5 — Notifications */}
+      <div className="card" style={{ marginBottom: 16 }}>
+        <div className="card-head">
+          <h3>
+            <Icon name="bell" size={16} /> Notifications
+          </h3>
+          <span className="text-xs faint">Get pinged on blockers, ships, and halts</span>
+        </div>
+        <div className="card-body" style={{ padding: "6px 18px" }}>
+          <SwitchRow
+            icon="bell"
+            title="Enable notifications"
+            hint="Alert the channels below when the events you pick happen. Provider credentials (SMTP, Twilio, Meta, Slack) are configured server-side in .env; recipients live here."
+            checked={draft.notifyEnabled}
+            onChange={(next) => edit({ notifyEnabled: next })}
+            last={!draft.notifyEnabled}
+          />
+          {draft.notifyEnabled && (
+            <>
+              <div className="field" style={{ margin: "14px 0 6px" }}>
+                <label>Channels</label>
+                <div className="row gap-8" style={{ flexWrap: "wrap" }}>
+                  {NOTIFY_CHANNELS.map((c) => {
+                    const on = Boolean(draft.notifyChannels?.[c.key]);
+                    return (
+                      <button
+                        key={c.key}
+                        type="button"
+                        aria-pressed={on}
+                        onClick={() => edit({ notifyChannels: { ...draft.notifyChannels, [c.key]: !on } })}
+                        style={chipStyle(on)}
+                      >
+                        {c.label}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div className="field" style={{ margin: "10px 0 6px" }}>
+                <label>Notify me on</label>
+                <div className="row gap-8" style={{ flexWrap: "wrap" }}>
+                  {NOTIFY_EVENTS.map((ev) => {
+                    const on = Boolean(draft.notifyEvents?.[ev.key]);
+                    return (
+                      <button
+                        key={ev.key}
+                        type="button"
+                        aria-pressed={on}
+                        onClick={() => edit({ notifyEvents: { ...draft.notifyEvents, [ev.key]: !on } })}
+                        style={chipStyle(on)}
+                      >
+                        {ev.label}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div className="field" style={{ marginBottom: 8 }}>
+                <label htmlFor="notify-email">Email address</label>
+                <input
+                  id="notify-email"
+                  type="email"
+                  placeholder="you@example.com"
+                  value={draft.notifyEmail}
+                  onChange={(e) => edit({ notifyEmail: e.target.value })}
+                  style={notifyInput}
+                />
+                <span className="hint">Used by the Email channel (needs SMTP configured server-side).</span>
+              </div>
+
+              <div className="field" style={{ marginBottom: 0 }}>
+                <label htmlFor="notify-whatsapp">WhatsApp number</label>
+                <input
+                  id="notify-whatsapp"
+                  type="tel"
+                  placeholder="+15551234567"
+                  value={draft.notifyWhatsapp}
+                  onChange={(e) => edit({ notifyWhatsapp: e.target.value })}
+                  style={notifyInput}
+                />
+                <span className="hint">E.164 format. Used by both WhatsApp channels.</span>
+              </div>
+            </>
+          )}
         </div>
       </div>
 

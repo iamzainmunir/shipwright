@@ -1109,6 +1109,11 @@ class SettingsPatch(_Body):
     guardrails: dict[str, bool] | None = None
     mission_key_prefix: str | None = None
     projects_dir: str | None = None
+    notify_enabled: bool | None = None
+    notify_channels: dict[str, bool] | None = None
+    notify_events: dict[str, bool] | None = None
+    notify_email: str | None = None
+    notify_whatsapp: str | None = None
 
 
 @router.get("/settings", description="x-required-scope: settings:read")
