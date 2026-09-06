@@ -17,6 +17,7 @@ import {
   getFeatures,
   getMetrics,
   getSettings,
+  sendNotifyTest,
   listAgents,
   updateFeatures,
   updateSettings,
@@ -54,7 +55,7 @@ const CHANNEL_HELP: Record<string, { note: string; href: string; label: string }
     label: "Meta Cloud API get-started",
   },
   slack: {
-    note: "Create a Slack Incoming Webhook — you choose the target channel when you create it, so no channel name is needed here — and paste its URL below.",
+    note: "Paste an Incoming Webhook URL for alerts (you pick the channel when you create it). For two-way — status commands and Approve/Reject buttons — also add your app's Signing secret and point its Slash Command + Interactivity request URLs at /api/v1/integrations/slack/commands and …/interactivity.",
     href: "https://api.slack.com/messaging/webhooks",
     label: "Slack Incoming Webhooks",
   },
@@ -80,6 +81,7 @@ const CHANNEL_FIELDS: Record<string, { key: string; label: string; secret?: bool
   ],
   slack: [
     { key: "slackWebhook", label: "Incoming webhook URL", secret: true, placeholder: "https://hooks.slack.com/services/…" },
+    { key: "slackSigningSecret", label: "Signing secret (for commands + approvals)", secret: true },
   ],
 };
 
@@ -421,12 +423,39 @@ function FeaturesCard() {
 
 export default function SettingsPage() {
   const [saved, setSaved] = useState<AutonomyPolicy | null>(null);
+  const { toast } = useToast();
   const [draft, setDraft] = useState<AutonomyPolicy | null>(null);
   const [metrics, setMetrics] = useState<Metrics | null>(null);
   const [agentCount, setAgentCount] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [justSaved, setJustSaved] = useState(false);
+  const [testing, setTesting] = useState(false);
+
+  async function testNotify() {
+    if (!draft) return;
+    setTesting(true);
+    try {
+      // persist the on-screen config first, so the test uses exactly what you see
+      await updateSettings({
+        notifyEnabled: draft.notifyEnabled,
+        notifyChannels: draft.notifyChannels,
+        notifyEmail: draft.notifyEmail,
+        notifyWhatsapp: draft.notifyWhatsapp,
+        notifyConfig: draft.notifyConfig,
+      });
+      const { sent } = await sendNotifyTest();
+      toast(
+        sent.length ? `Test sent to: ${sent.join(", ")}` : "No channels sent — enable one and add its credentials",
+        undefined,
+        sent.length ? "ok" : "warn",
+      );
+    } catch (e) {
+      toast("Test failed", isApiError(e) ? e.message : undefined, "err");
+    } finally {
+      setTesting(false);
+    }
+  }
 
   useEffect(() => {
     getSettings()
@@ -996,6 +1025,15 @@ export default function SettingsPage() {
                   </div>
                 );
               })}
+
+              <div className="row" style={{ justifyContent: "flex-end", marginTop: 12, gap: 8 }}>
+                <span className="hint" style={{ alignSelf: "center" }}>
+                  Sends a test to every enabled, configured channel.
+                </span>
+                <Button variant="subtle" size="sm" onClick={testNotify} disabled={testing}>
+                  <Icon name="bolt" size={13} /> {testing ? "Sending…" : "Send test"}
+                </Button>
+              </div>
             </>
           )}
         </div>

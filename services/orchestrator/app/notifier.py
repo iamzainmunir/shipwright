@@ -25,6 +25,8 @@ import structlog
 from foundry_core.enums import BlockerKind
 from foundry_core.models import Blocker, Mission
 
+from .slack_integration import approval_blocks
+
 log = structlog.get_logger(__name__)
 
 # Event keys — must match the keys the Settings UI writes into notify_events.
@@ -69,11 +71,12 @@ class Notifier:
         is_approval = blocker.kind == BlockerKind.APPROVAL
         event = EV_APPROVAL if is_approval else EV_BLOCKER
         head = "Approval needed" if is_approval else "Mission blocked"
-        await self._dispatch(
-            mission, event,
-            subject=f"[Shipwright] {head} — {mission.key}: {mission.title}",
-            body=f"{head} on {mission.key} ({mission.title}).\n\n{self._blocker_detail(blocker)}",
-        )
+        subject = f"[Shipwright] {head} — {mission.key}: {mission.title}"
+        body = f"{head} on {mission.key} ({mission.title}).\n\n{self._blocker_detail(blocker)}"
+        # An approval gate gets interactive Approve/Reject buttons on Slack (resolved via the signed
+        # /integrations/slack/interactivity endpoint).
+        slack_blocks = approval_blocks(subject, body, blocker.id) if is_approval else None
+        await self._dispatch(mission, event, subject=subject, body=body, slack_blocks=slack_blocks)
 
     async def on_completed(self, mission: Mission) -> None:
         await self._dispatch(
@@ -89,8 +92,36 @@ class Notifier:
             body=f"{mission.key} ({mission.title}) halted and needs your attention.\n\n{message}".strip(),
         )
 
+    async def send_test(self, workspace_id: str) -> list[str]:
+        """Send a test message to every *enabled* channel (ignores the event filter) — powers the
+        Settings "Send test" button. Returns the channels attempted; a channel with no credentials
+        skips silently, so a name here means "tried", not "guaranteed delivered"."""
+        try:
+            prefs = await self._store.get_settings(workspace_id)
+        except Exception as exc:  # noqa: BLE001
+            log.warning("notify.test_prefs_failed", error=str(exc))
+            return []
+        channels = getattr(prefs, "notify_channels", None) or {}
+        subject = "[Shipwright] Test notification"
+        body = "✅ Your Shipwright notifications are working — this is a test."
+        senders = {
+            CH_EMAIL: self._send_email, CH_TWILIO: self._send_twilio,
+            CH_META: self._send_meta, CH_SLACK: self._send_slack,
+        }
+        sent: list[str] = []
+        for key, fn in senders.items():
+            if not channels.get(key, False):
+                continue
+            try:
+                await fn(prefs, subject, body)
+                sent.append(key)
+            except Exception as exc:  # noqa: BLE001 — report per-channel, never raise
+                log.warning("notify.test_failed", channel=key, error=str(exc))
+        return sent
+
     # ---- dispatch ---------------------------------------------------------------
-    async def _dispatch(self, mission: Mission, event: str, *, subject: str, body: str) -> None:
+    async def _dispatch(self, mission: Mission, event: str, *, subject: str, body: str,
+                        slack_blocks: list | None = None) -> None:
         try:
             prefs = await self._store.get_settings(mission.workspace_id)
         except Exception as exc:  # pragma: no cover - store hiccup must not fail a run
@@ -106,7 +137,7 @@ class Notifier:
             CH_EMAIL: lambda: self._send_email(prefs, subject, body),
             CH_TWILIO: lambda: self._send_twilio(prefs, subject, body),
             CH_META: lambda: self._send_meta(prefs, subject, body),
-            CH_SLACK: lambda: self._send_slack(prefs, subject, body),
+            CH_SLACK: lambda: self._send_slack(prefs, subject, body, slack_blocks),
         }
         for key, make in senders.items():
             if not channels.get(key, False):
@@ -190,10 +221,11 @@ class Notifier:
             )
             resp.raise_for_status()
 
-    async def _send_slack(self, prefs, subject: str, body: str) -> None:
+    async def _send_slack(self, prefs, subject: str, body: str, blocks: list | None = None) -> None:
         webhook = _cfg(prefs, "slackWebhook", "SLACK_WEBHOOK")
         if not webhook:
             return
+        payload = {"blocks": blocks} if blocks else {"text": f"*{subject}*\n{body}"}
         async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
-            resp = await client.post(webhook, json={"text": f"*{subject}*\n{body}"})
+            resp = await client.post(webhook, json=payload)
             resp.raise_for_status()
