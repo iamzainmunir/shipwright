@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 from datetime import UTC, datetime
 
+from foundry_core.ids import new_ulid, slugify
 from foundry_core.models import (
     Agent,
     Artifact,
@@ -24,6 +25,7 @@ from foundry_core.models import (
     Memory,
     Mission,
     ModelConnection,
+    Project,
     Run,
     Skill,
     Step,
@@ -77,6 +79,7 @@ class InMemoryStore:
         self.memories: dict[str, Memory] = {}
         self.integrations: dict[str, Integration] = {}
         self.custom_roles: dict[str, CustomRole] = {}
+        self.projects: dict[str, Project] = {}
         self.settings: AutonomyPolicy = default_settings()
         self._key_seq = 150
         self._seed()
@@ -351,6 +354,40 @@ class InMemoryStore:
     async def add_team(self, team: Team) -> Team:
         self.teams[team.id] = team
         return team
+
+    # ---- projects (registry) ----------------------------------------------------
+    async def list_projects(self, workspace_id: str = DEMO_WS) -> list[Project]:
+        out = [p for p in self.projects.values() if p.workspace_id == workspace_id]
+        return sorted(out, key=lambda p: str(p.last_activity_at or p.created_at or ""), reverse=True)
+
+    async def get_project(self, id_or_path: str, workspace_id: str = DEMO_WS) -> Project | None:
+        for p in self.projects.values():
+            if p.workspace_id == workspace_id and id_or_path in (p.id, p.path):
+                return p
+        return None
+
+    async def create_project(self, project: Project) -> Project:
+        self.projects[project.id] = project
+        return project
+
+    async def upsert_built_project(self, workspace_id: str, name: str, path: str) -> Project:
+        existing = await self.get_project(path, workspace_id)
+        if existing is not None:
+            return existing
+        project = Project(
+            id=new_ulid(), workspace_id=workspace_id, name=name, slug=slugify(name),
+            path=path, source="built", created_at=_now(),
+        )
+        self.projects[project.id] = project
+        return project
+
+    async def delete_project(self, project_id: str, workspace_id: str = DEMO_WS) -> None:
+        self.projects.pop(project_id, None)
+
+    async def touch_project(self, path: str, workspace_id: str = DEMO_WS) -> None:
+        p = await self.get_project(path, workspace_id)
+        if p is not None:
+            self.projects[p.id] = p.model_copy(update={"last_activity_at": _now()})
 
     async def update_team(self, team_id: str, **changes: object) -> Team:
         team = self.teams[team_id]

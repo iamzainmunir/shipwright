@@ -21,6 +21,7 @@ from datetime import UTC, datetime
 from enum import Enum
 from typing import Any, TypeVar
 
+from foundry_core.ids import new_ulid, slugify
 from foundry_core.models import (
     Agent,
     Artifact,
@@ -34,6 +35,7 @@ from foundry_core.models import (
     Memory,
     Mission,
     ModelConnection,
+    Project,
     Run,
     Skill,
     Step,
@@ -59,6 +61,7 @@ from .db_models import (
     MemoryRow,
     MissionRow,
     ModelConnectionRow,
+    ProjectRow,
     RunRow,
     SkillRow,
     StepRow,
@@ -534,6 +537,53 @@ class PostgresStore:
             row = await s.get(TeamRow, team_id)
             if row is not None:
                 await s.delete(row)
+                await s.commit()
+
+    # ---- projects (registry) ----------------------------------------------------
+    async def list_projects(self, workspace_id: str = DEMO_WS) -> list[Project]:
+        async with self._sess() as s:
+            rows = (await s.scalars(select(ProjectRow))).all()
+            out = [Project.model_validate(r) for r in rows]
+        return sorted(out, key=lambda p: str(p.last_activity_at or p.created_at or ""), reverse=True)
+
+    async def get_project(self, id_or_path: str, workspace_id: str = DEMO_WS) -> Project | None:
+        async with self._sess() as s:
+            row = await s.scalar(
+                select(ProjectRow).where(or_(ProjectRow.id == id_or_path, ProjectRow.path == id_or_path))
+            )
+            return Project.model_validate(row) if row else None
+
+    async def create_project(self, project: Project) -> Project:
+        async with self._sess() as s:
+            s.add(ProjectRow(**project.model_dump()))
+            await s.commit()
+        return project
+
+    async def upsert_built_project(self, workspace_id: str, name: str, path: str) -> Project:
+        async with self._sess() as s:
+            row = await s.scalar(select(ProjectRow).where(ProjectRow.path == path))
+            if row is not None:
+                return Project.model_validate(row)
+            project = Project(
+                id=new_ulid(), workspace_id=workspace_id, name=name, slug=slugify(name),
+                path=path, source="built", created_at=_now(),
+            )
+            s.add(ProjectRow(**project.model_dump()))
+            await s.commit()
+            return project
+
+    async def delete_project(self, project_id: str, workspace_id: str = DEMO_WS) -> None:
+        async with self._sess() as s:
+            row = await s.get(ProjectRow, project_id)
+            if row is not None:
+                await s.delete(row)
+                await s.commit()
+
+    async def touch_project(self, path: str, workspace_id: str = DEMO_WS) -> None:
+        async with self._sess() as s:
+            row = await s.scalar(select(ProjectRow).where(ProjectRow.path == path))
+            if row is not None:
+                row.last_activity_at = _now()
                 await s.commit()
 
     async def list_model_connections(self, workspace_id: str = DEMO_WS) -> list[ModelConnection]:

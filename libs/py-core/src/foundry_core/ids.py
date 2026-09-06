@@ -9,7 +9,15 @@ from __future__ import annotations
 
 from ulid import ULID
 
-__all__ = ["new_ulid", "mission_key"]
+__all__ = ["new_ulid", "mission_key", "slugify"]
+
+
+def slugify(name: str) -> str:
+    """A lowercase, dash-separated slug from a display name (e.g. "API Gateway" → "api-gateway")."""
+    out = "".join(c if c.isalnum() else "-" for c in (name or "").lower())
+    while "--" in out:
+        out = out.replace("--", "-")
+    return out.strip("-") or "project"
 
 
 def new_ulid() -> str:
