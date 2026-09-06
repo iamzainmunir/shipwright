@@ -163,6 +163,21 @@ export interface Project {
   lastActivityAt?: string | null;
 }
 
+/** A directory entry from the local filesystem browser (path picker). */
+export interface DirEntry {
+  name: string;
+  path: string;
+  isRepo: boolean;
+}
+export interface DirListing {
+  path: string;
+  parent: string | null;
+  entries: DirEntry[];
+}
+/** Browse local directories for the path picker (empty path → the home dir). */
+export const listDir = (path?: string) =>
+  api.get<DirListing>(`${V1}/fs/list${path ? `?path=${encodeURIComponent(path)}` : ""}`);
+
 export const listProjects = () => api.get<Project[]>(`${V1}/projects`);
 export const registerProject = (body: { name: string; path: string }) =>
   api.post<Project>(`${V1}/projects`, body);

@@ -7,6 +7,7 @@ import type { ReactNode } from "react";
 import { isApiError } from "@/lib/api";
 import { BRAND } from "@/lib/brand";
 import { AUTONOMY_LEVELS, type AutonomyLevel, type Team, createMission, extractRequirements, listTeams } from "@/lib/foundry";
+import { DirectoryPicker } from "@/components/dir-picker";
 import { useToast } from "@/components/toast";
 import { useShellData } from "./shell-data";
 
@@ -53,6 +54,7 @@ function NewMissionModal({ onClose }: { onClose: () => void }) {
   const [title, setTitle] = useState("");
   const [requirements, setRequirements] = useState("");
   const [projectPath, setProjectPath] = useState("");
+  const [pickPath, setPickPath] = useState(false);
   const [uploadName, setUploadName] = useState("");
   const [uploading, setUploading] = useState(false);
   const [source, setSource] = useState("jira");
@@ -189,9 +191,25 @@ function NewMissionModal({ onClose }: { onClose: () => void }) {
             <label htmlFor="nm-path">
               {isApp ? <>Project location <span className="faint">(optional)</span></> : <>Existing repo path <span className="faint">(required for a real edit)</span></>}
             </label>
-            <input id="nm-path" className="input mono" value={projectPath}
-                   onChange={(e) => setProjectPath(e.target.value)}
-                   placeholder={isApp ? `~/${BRAND.projectsDirName}/<mission>-<slug>  (default)` : "/path/to/your/repo"} />
+            <div className="row gap-8" style={{ alignItems: "center" }}>
+              <input id="nm-path" className="input mono" style={{ flex: 1 }} value={projectPath}
+                     onChange={(e) => setProjectPath(e.target.value)}
+                     placeholder={isApp ? `~/${BRAND.projectsDirName}/<mission>-<slug>  (default)` : "/path/to/your/repo"} />
+              <Button variant="subtle" size="sm" type="button" onClick={() => setPickPath(true)}>
+                <Icon name="branch" size={13} /> Browse…
+              </Button>
+            </div>
+            {pickPath && (
+              <DirectoryPicker
+                title={isApp ? "Choose where to build" : "Choose the repo to edit"}
+                initialPath={projectPath.trim() || undefined}
+                onClose={() => setPickPath(false)}
+                onSelect={(p) => {
+                  setProjectPath(p);
+                  setPickPath(false);
+                }}
+              />
+            )}
             <span className="hint">
               {isApp
                 ? "Where the app is created on disk. Leave blank for the default."

@@ -4,6 +4,7 @@ import { Badge, Button, Icon } from "@foundry/ui";
 import { useRouter } from "next/navigation";
 import { type CSSProperties, useEffect, useState } from "react";
 import { isApiError } from "@/lib/api";
+import { DirectoryPicker } from "@/components/dir-picker";
 import { useToast } from "@/components/toast";
 import {
   type Project,
@@ -238,6 +239,7 @@ function RegisterModal({ onClose, onDone }: { onClose: () => void; onDone: () =>
   const [path, setPath] = useState("");
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const [pick, setPick] = useState(false);
 
   async function save() {
     if (!name.trim() || !path.trim()) return;
@@ -278,14 +280,30 @@ function RegisterModal({ onClose, onDone }: { onClose: () => void; onDone: () =>
         </div>
         <div className="field">
           <label htmlFor="rp-path">Local repo path</label>
-          <input
-            id="rp-path"
-            value={path}
-            onChange={(e) => setPath(e.target.value)}
-            placeholder="/Users/you/code/gateway"
-            style={{ ...inp, fontFamily: "var(--font-mono, monospace)" }}
-          />
+          <div className="row gap-8" style={{ alignItems: "center" }}>
+            <input
+              id="rp-path"
+              value={path}
+              onChange={(e) => setPath(e.target.value)}
+              placeholder="/path/to/your/repo"
+              style={{ ...inp, flex: 1, fontFamily: "var(--font-mono, monospace)" }}
+            />
+            <Button variant="subtle" size="sm" onClick={() => setPick(true)}>
+              <Icon name="branch" size={13} /> Browse…
+            </Button>
+          </div>
         </div>
+        {pick && (
+          <DirectoryPicker
+            title="Choose the project's repo"
+            initialPath={path.trim() || undefined}
+            onClose={() => setPick(false)}
+            onSelect={(p) => {
+              setPath(p);
+              setPick(false);
+            }}
+          />
+        )}
         {err && (
           <div className="lb-error" role="alert">
             {err}
