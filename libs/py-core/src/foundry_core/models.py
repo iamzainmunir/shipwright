@@ -140,10 +140,19 @@ class Mission(FoundryModel):
     # the full brief (e.g. extracted from an uploaded .docx/.md).
     project_kind: str | None = None
     project_path: str | None = None
+    # Multi-project working set (Approach A): the Project ids a coordinated change spans. Empty ⇒
+    # single-project behavior via `project_path`. `project_path` stays the primary/home repo.
+    project_ids: list[str] = Field(default_factory=list)
     requirements: str | None = None
     team_id: str | None = None  # the Team staffing this mission (None = default org roster)
     created_at: datetime | None = None
     updated_at: datetime | None = None
+
+    @field_validator("project_ids", "labels", mode="before")
+    @classmethod
+    def _coerce_none_list(cls, v: object) -> object:
+        """A JSON list column can be NULL for rows created before the field existed — read as ``[]``."""
+        return v if v is not None else []
 
 
 class Agent(FoundryModel):

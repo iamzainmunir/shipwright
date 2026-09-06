@@ -56,6 +56,7 @@ class MissionRow(Base):
     is_blocked: Mapped[bool] = mapped_column(Boolean, default=False)
     project_kind: Mapped[str | None] = mapped_column(String(16), nullable=True)
     project_path: Mapped[str | None] = mapped_column(Text, nullable=True)
+    project_ids: Mapped[list] = mapped_column(JSON, default=list)
     requirements: Mapped[str | None] = mapped_column(Text, nullable=True)
     team_id: Mapped[str | None] = mapped_column(String(40), nullable=True)
     created_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
