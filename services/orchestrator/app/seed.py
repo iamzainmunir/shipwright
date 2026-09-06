@@ -95,7 +95,7 @@ def seed_model_connections() -> list[ModelConnection]:
             id=new_ulid(), org_id=DEMO_ORG, workspace_id=DEMO_WS,
             provider=ModelProvider.ANTHROPIC, kind=ModelKind.CLOUD,
             models=["claude-opus-4-8", "claude-sonnet-5", "claude-haiku-4-5"],
-            credential_ref="secret/data/foundry/{org}/{ws}/models/anthropic#api_key",
+            credential_ref="secret/data/shipwright/{org}/{ws}/models/anthropic#api_key",
             status=ConnectionStatus.CONNECTED, is_primary=True,
         ),
         ModelConnection(

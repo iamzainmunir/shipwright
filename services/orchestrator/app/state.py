@@ -54,7 +54,7 @@ def get_preview_manager():
 
 
 def get_engine() -> RunEngine:
-    """The active engine, selected by ``FOUNDRY_ENGINE`` (plan 02 §6 strangler migration).
+    """The active engine, selected by ``SHIPWRIGHT_ENGINE`` (plan 02 §6 strangler migration).
 
     'legacy' → the hand-rolled RunEngine (default, battle-tested);
     'graph'  → the LangGraph engine (v2). Both satisfy :class:`app.engine_protocol.EngineProtocol`;

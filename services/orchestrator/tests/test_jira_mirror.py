@@ -160,7 +160,7 @@ async def test_worker_creates_issues_maps_and_transitions(wired):
 
 async def test_worker_attaches_evidence(wired, tmp_path, monkeypatch):
     store, svc, mission = wired
-    monkeypatch.setenv("FOUNDRY_ARTIFACTS_ROOT", str(tmp_path))
+    monkeypatch.setenv("SHIPWRIGHT_ARTIFACTS_ROOT", str(tmp_path))
     config.get_settings.cache_clear()
     from app.artifacts import make_artifact_record, run_artifact_dir
     d = run_artifact_dir(mission.id, "run1", "qa")

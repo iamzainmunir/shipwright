@@ -126,7 +126,7 @@ pnpm infra:up
 # 2) Orchestrator API — graph engine + Postgres persistence (recommended)
 cd services/orchestrator
 uv sync
-FOUNDRY_ENGINE=graph uv run uvicorn app.main:app --reload --port 8000    # http://localhost:8000
+SHIPWRIGHT_ENGINE=graph uv run uvicorn app.main:app --reload --port 8000    # http://localhost:8000
 
 # 3) Web dashboard (separate terminal, Node ≥22)
 export PATH="$(brew --prefix node@22)/bin:$PATH"
@@ -144,20 +144,20 @@ The engine, store, and LLM adapter sit behind reversible env switches:
 
 | Switch | Values | Effect |
 |---|---|---|
-| `FOUNDRY_ENGINE` | `legacy` · `graph` | `graph` runs the checkpointed **LangGraph** engine (`app/graph_engine.py`); `legacy` the hand-rolled loop |
-| `FOUNDRY_STORE` | `memory` · `postgres` | `postgres` persists everything — **`memory` wipes all data on every restart** |
-| `FOUNDRY_LLM_ADAPTER` | `litellm` · `legacy` | LLM provider adapter |
-| `FOUNDRY_SEED` | `1` · `0` | `0` disables the demo reseed on restart (keep your own agents/teams) |
+| `SHIPWRIGHT_ENGINE` | `legacy` · `graph` | `graph` runs the checkpointed **LangGraph** engine (`app/graph_engine.py`); `legacy` the hand-rolled loop |
+| `SHIPWRIGHT_STORE` | `memory` · `postgres` | `postgres` persists everything — **`memory` wipes all data on every restart** |
+| `SHIPWRIGHT_LLM_ADAPTER` | `litellm` · `legacy` | LLM provider adapter |
+| `SHIPWRIGHT_SEED` | `1` · `0` | `0` disables the demo reseed on restart (keep your own agents/teams) |
 
 **Persistence is opt-in and must be `postgres`, or runs/tickets/missions vanish on restart.** The
 orchestrator's `.env` selects it:
 
 ```bash
-FOUNDRY_STORE=postgres
+SHIPWRIGHT_STORE=postgres
 DATABASE_URL=postgresql+asyncpg://foundry_app@127.0.0.1:5432/foundry_dev
 ```
 
-On `FOUNDRY_ENV=local` the orchestrator **auto-migrates to head** (`alembic upgrade head`) and seeds on startup. Verify:
+On `SHIPWRIGHT_ENV=local` the orchestrator **auto-migrates to head** (`alembic upgrade head`) and seeds on startup. Verify:
 
 ```bash
 curl -s localhost:8000/healthz          # startup log reads: backend=postgres … autoMigrate=True
@@ -177,3 +177,7 @@ cd apps/web && pnpm exec tsc --noEmit && pnpm exec next lint                    
 - **[docs/DEMO.md](docs/DEMO.md)** — a 5–7 minute guided walkthrough / presenter's script for the product tour.
 - **[docs/VERSIONS.md](docs/VERSIONS.md)** — pinned toolchain & ports.
 - **[services/orchestrator/README.md](services/orchestrator/README.md)** — the API + engine internals.
+
+## License
+
+Licensed under the **Apache License 2.0** — see [LICENSE](LICENSE) and [NOTICE](NOTICE).

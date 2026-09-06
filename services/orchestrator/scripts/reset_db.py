@@ -5,11 +5,11 @@ skills, memories, integrations, settings) and resets the mission-key sequence. D
 there is no undo.
 
 After running, restart the orchestrator:
-  * default (FOUNDRY_SEED unset/1) → the honest baseline fixtures are re-seeded.
-  * FOUNDRY_SEED=0                 → the workspace stays completely empty.
+  * default (SHIPWRIGHT_SEED unset/1) → the honest baseline fixtures are re-seeded.
+  * SHIPWRIGHT_SEED=0                 → the workspace stays completely empty.
 
 Usage (from services/orchestrator):
-  DATABASE_URL="postgresql+asyncpg://foundry_app@127.0.0.1:5432/foundry_dev" \\
+  DATABASE_URL="postgresql+asyncpg://shipwright_app@127.0.0.1:5432/shipwright_dev" \\
     uv run python scripts/reset_db.py --yes
 """
 from __future__ import annotations
@@ -44,7 +44,7 @@ async def main() -> None:
         await conn.execute(text(f"ALTER SEQUENCE mission_key_seq RESTART WITH {MISSION_KEY_START}"))
     await engine.dispose()
     print(f"Wiped {len(TABLES)} tables and reset mission_key_seq to {MISSION_KEY_START}.")
-    print("Restart the orchestrator: FOUNDRY_SEED=0 for an empty workspace, or default to re-seed the baseline.")
+    print("Restart the orchestrator: SHIPWRIGHT_SEED=0 for an empty workspace, or default to re-seed the baseline.")
 
 
 if __name__ == "__main__":

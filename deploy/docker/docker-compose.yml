@@ -10,11 +10,11 @@
 # by the `db` subtree. They must exist before first boot — Postgres runs them ONCE on an empty volume
 # (alphabetical order, so migrations precede the seed). Re-seed with `docker compose down -v`.
 
-name: foundry
+name: shipwright
 
 networks:
-  foundry:
-    name: foundry
+  shipwright:
+    name: shipwright
 
 volumes:
   pgdata:
@@ -28,9 +28,9 @@ services:
     image: pgvector/pgvector:pg16
     restart: unless-stopped
     environment:
-      POSTGRES_DB: ${POSTGRES_DB:-foundry}
-      POSTGRES_USER: ${POSTGRES_USER:-foundry}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-foundry_dev}
+      POSTGRES_DB: ${POSTGRES_DB:-shipwright}
+      POSTGRES_USER: ${POSTGRES_USER:-shipwright}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-shipwright_dev}
     ports:
       - "${POSTGRES_PORT:-5432}:5432"
     volumes:
@@ -45,7 +45,7 @@ services:
       timeout: 5s
       retries: 10
       start_period: 20s
-    networks: [foundry]
+    networks: [shipwright]
 
   # ---- Redis 7 (event bus / pub-sub / cache) ----
   redis:
@@ -61,7 +61,7 @@ services:
       interval: 10s
       timeout: 3s
       retries: 10
-    networks: [foundry]
+    networks: [shipwright]
 
   # ---- Temporal server (auto-setup: creates schema + `default` namespace in Postgres) ----
   temporal:
@@ -74,8 +74,8 @@ services:
       DB: postgres12                     # schema plugin name for PostgreSQL 12+ (works on PG16)
       DB_PORT: 5432
       POSTGRES_SEEDS: postgres           # hostname of the postgres service
-      POSTGRES_USER: ${POSTGRES_USER:-foundry}
-      POSTGRES_PWD: ${POSTGRES_PASSWORD:-foundry_dev}
+      POSTGRES_USER: ${POSTGRES_USER:-shipwright}
+      POSTGRES_PWD: ${POSTGRES_PASSWORD:-shipwright_dev}
       ENABLE_ES: "false"                 # visibility store = Postgres (no Elasticsearch locally)
     ports:
       - "7233:7233"
@@ -85,7 +85,7 @@ services:
       timeout: 10s
       retries: 15
       start_period: 30s
-    networks: [foundry]
+    networks: [shipwright]
 
   # ---- Temporal Web UI ----
   temporal-ui:
@@ -99,14 +99,14 @@ services:
       TEMPORAL_CORS_ORIGINS: http://localhost:8088
     ports:
       - "8088:8080"
-    networks: [foundry]
+    networks: [shipwright]
 
   # ---- ClickHouse 24 (usage / event analytics) ----
   clickhouse:
     image: clickhouse/clickhouse-server:24-alpine
     restart: unless-stopped
     environment:
-      CLICKHOUSE_DB: ${CLICKHOUSE_DB:-foundry}
+      CLICKHOUSE_DB: ${CLICKHOUSE_DB:-shipwright}
     ports:
       - "8123:8123"                      # HTTP
       - "9000:9000"                      # native protocol
@@ -122,7 +122,7 @@ services:
       timeout: 5s
       retries: 10
       start_period: 15s
-    networks: [foundry]
+    networks: [shipwright]
 
   # ---- MinIO (S3-compatible object store) ----
   minio:
@@ -130,8 +130,8 @@ services:
     restart: unless-stopped
     command: server /data --address ":9100" --console-address ":9101"
     environment:
-      MINIO_ROOT_USER: ${S3_ACCESS_KEY:-foundry}
-      MINIO_ROOT_PASSWORD: ${S3_SECRET_KEY:-foundry_dev}
+      MINIO_ROOT_USER: ${S3_ACCESS_KEY:-shipwright}
+      MINIO_ROOT_PASSWORD: ${S3_SECRET_KEY:-shipwright_dev}
     ports:
       - "9100:9100"                      # S3 API
       - "9101:9101"                      # web console
@@ -143,7 +143,7 @@ services:
       timeout: 5s
       retries: 10
       start_period: 15s
-    networks: [foundry]
+    networks: [shipwright]
 
   # ---- one-shot: create the artifacts bucket, then exit ----
   createbuckets:
@@ -153,9 +153,9 @@ services:
         condition: service_healthy
     restart: "no"
     environment:
-      S3_ACCESS_KEY: ${S3_ACCESS_KEY:-foundry}
-      S3_SECRET_KEY: ${S3_SECRET_KEY:-foundry_dev}
-      S3_BUCKET: ${S3_BUCKET:-foundry-artifacts}
+      S3_ACCESS_KEY: ${S3_ACCESS_KEY:-shipwright}
+      S3_SECRET_KEY: ${S3_SECRET_KEY:-shipwright_dev}
+      S3_BUCKET: ${S3_BUCKET:-shipwright-artifacts}
     entrypoint: >
       /bin/sh -c "
       until /usr/bin/mc alias set local http://minio:9100 $$S3_ACCESS_KEY $$S3_SECRET_KEY; do
@@ -165,7 +165,7 @@ services:
       echo 'bucket ready: '$$S3_BUCKET;
       exit 0;
       "
-    networks: [foundry]
+    networks: [shipwright]
 
   # ---- Vault (dev mode — in-memory, auto-unsealed, root token from .env) ----
   vault:
@@ -175,7 +175,7 @@ services:
     cap_add:
       - IPC_LOCK
     environment:
-      VAULT_DEV_ROOT_TOKEN_ID: ${VAULT_TOKEN:-foundry-dev-root}
+      VAULT_DEV_ROOT_TOKEN_ID: ${VAULT_TOKEN:-shipwright-dev-root}
       VAULT_DEV_LISTEN_ADDRESS: 0.0.0.0:8200
       VAULT_ADDR: http://127.0.0.1:8200  # container-local, for the `vault status` healthcheck CLI
     ports:
@@ -186,4 +186,4 @@ services:
       timeout: 5s
       retries: 10
       start_period: 10s
-    networks: [foundry]
+    networks: [shipwright]

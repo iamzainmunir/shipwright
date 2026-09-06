@@ -326,3 +326,5 @@ class AutonomyPolicyRow(Base):
     max_parallel_agents: Mapped[int] = mapped_column(Integer, default=6)
     guardrails: Mapped[dict] = mapped_column(JSON, default=dict)
     features: Mapped[dict] = mapped_column(JSON, default=dict)
+    mission_key_prefix: Mapped[str] = mapped_column(String(16), default="")
+    projects_dir: Mapped[str] = mapped_column(String(512), default="")

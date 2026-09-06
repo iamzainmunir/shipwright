@@ -87,7 +87,8 @@ class InMemoryStore:
 
         async with self._lock:
             self._key_seq += 1
-            return f"{get_settings().mission_key_prefix}-{self._key_seq}"
+            prefix = (self.settings.mission_key_prefix or "").strip() or get_settings().mission_key_prefix
+            return f"{prefix}-{self._key_seq}"
 
     # ---- missions ---------------------------------------------------------------
     async def list_missions(self, workspace_id: str = DEMO_WS) -> list[Mission]:

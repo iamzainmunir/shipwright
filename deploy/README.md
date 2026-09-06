@@ -49,13 +49,13 @@ docker compose -f deploy/docker/docker-compose.yml down -v      # stop AND wipe 
 
 | Service | Host port(s) | Notes |
 |---|---|---|
-| Postgres (+ pgvector) | `5432` | user/db/password from `.env` (`foundry` / `foundry` / `foundry_dev`) |
+| Postgres (+ pgvector) | `5432` | user/db/password from `.env` (`shipwright` / `shipwright` / `shipwright_dev`) |
 | Redis | `6379` | AOF persistence on |
 | Temporal (gRPC) | `7233` | schema + `default` namespace auto-created in Postgres |
 | Temporal UI | `8088` | http://localhost:8088 |
 | ClickHouse | `8123` / `9000` | HTTP / native |
 | MinIO API / Console | `9100` / `9101` | console http://localhost:9101 |
-| Vault (dev) | `8200` | root token `foundry-dev-root` (`VAULT_TOKEN`) |
+| Vault (dev) | `8200` | root token `shipwright-dev-root` (`VAULT_TOKEN`) |
 
 App services (built from the Dockerfiles below, not part of this compose): web `3000`,
 orchestrator `8000`, ingester `8090`.
@@ -72,7 +72,7 @@ empty data volume, in filename order. The compose file mounts:
 So a brand-new database comes up already migrated and seeded. These scripts **do not** re-run on
 subsequent starts. To reset and re-seed, drop the volume: `docker compose ... down -v` then `up`.
 
-MinIO's `foundry-artifacts` bucket (`S3_BUCKET`) is created by the one-shot `createbuckets`
+MinIO's `shipwright-artifacts` bucket (`S3_BUCKET`) is created by the one-shot `createbuckets`
 service after MinIO is healthy.
 
 ## Build the service images
@@ -81,9 +81,9 @@ Build contexts are the **repo root** (the web and orchestrator images depend on 
 siblings — JS `workspace:*` packages / the editable `foundry-core` lib):
 
 ```bash
-docker build -f deploy/docker/web.Dockerfile          -t foundry/web          .
-docker build -f deploy/docker/orchestrator.Dockerfile -t foundry/orchestrator .
-docker build -f deploy/docker/ingester.Dockerfile     -t foundry/ingester     .
+docker build -f deploy/docker/web.Dockerfile          -t shipwright/web          .
+docker build -f deploy/docker/orchestrator.Dockerfile -t shipwright/orchestrator .
+docker build -f deploy/docker/ingester.Dockerfile     -t shipwright/ingester     .
 ```
 
 - **web.Dockerfile** — `node:24-alpine`, pnpm via corepack, installs the workspace, builds

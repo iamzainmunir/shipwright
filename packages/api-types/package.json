@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "description": "Shipwright shared API TypeScript types (hand-authored seed; later generated from the OpenAPI spec — doc 03).",
+  "license": "Apache-2.0",
   "exports": {
     ".": "./src/index.ts"
   },

@@ -2,7 +2,7 @@
 
 Both engines (the legacy hand-rolled loop and the v2 LangGraph engine) implement this
 Protocol. The API routes depend on it structurally, never on a concrete class, so the
-engine is swappable via ``FOUNDRY_ENGINE=legacy|graph`` with zero API/web changes.
+engine is swappable via ``SHIPWRIGHT_ENGINE=legacy|graph`` with zero API/web changes.
 
 Everything else an engine does (store rows, events, gates) flows through the store and
 event bus — the UI renders those, not engine internals. Signatures mirror the legacy

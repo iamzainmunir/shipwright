@@ -3,7 +3,7 @@ project ("TODO app simple version") — plus the integrations list (disconnected
 missions, runs, skills, memories, extra models, or teams.
 
 Run (from services/orchestrator):
-  DATABASE_URL="postgresql+asyncpg://foundry_app@127.0.0.1:5432/foundry_dev" \\
+  DATABASE_URL="postgresql+asyncpg://shipwright_app@127.0.0.1:5432/shipwright_dev" \\
     uv run python scripts/seed_todo_demo.py --yes
 """
 from __future__ import annotations

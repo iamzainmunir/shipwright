@@ -2,7 +2,7 @@
 
 :class:`CoreSettings` is the common env surface every Python service (orchestrator, runner,
 qa-runner workers) mixes in or subclasses. Values load from process env and an optional
-``.env`` file, all prefixed ``FOUNDRY_`` — e.g. ``FOUNDRY_DATABASE_URL``. Ports default to
+``.env`` file, all prefixed ``SHIPWRIGHT_`` — e.g. ``SHIPWRIGHT_DATABASE_URL``. Ports default to
 the values pinned in ``docs/VERSIONS.md``.
 """
 
@@ -23,7 +23,7 @@ class CoreSettings(BaseSettings):
     """
 
     model_config = SettingsConfigDict(
-        env_prefix="FOUNDRY_",
+        env_prefix="SHIPWRIGHT_",
         env_file=".env",
         env_file_encoding="utf-8",
         extra="ignore",
@@ -33,11 +33,11 @@ class CoreSettings(BaseSettings):
     # --- Runtime -----------------------------------------------------------------
     environment: str = "development"  # development | staging | production
     log_level: str = "INFO"
-    service_name: str = "foundry-core"
+    service_name: str = "shipwright-core"
 
     # --- Datastores (see docs/VERSIONS.md) --------------------------------------
     # SQLAlchemy async URL; psycopg3 driver by default (Postgres 16 + pgvector).
-    database_url: str = "postgresql+psycopg://foundry:foundry@localhost:5432/foundry"
+    database_url: str = "postgresql+psycopg://shipwright:shipwright@localhost:5432/shipwright"
     redis_url: str = "redis://localhost:6379/0"
 
     # --- Tenancy defaults (GUCs are app.workspace_id / app.org_id — Canon §13.2) -

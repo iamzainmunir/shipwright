@@ -178,7 +178,7 @@ reaches the outside world.
 
 ## 10. Persistence & engine
 
-- **Store** — `FOUNDRY_STORE=postgres` persists missions, runs, tickets, agents, and metering (RLS-scoped per workspace). `memory` is ephemeral (wiped every restart).
-- **Engine** — `FOUNDRY_ENGINE=graph` runs the checkpointed LangGraph `StateGraph`; `legacy` the hand-rolled loop. Both implement the same decision graph and gates.
+- **Store** — `SHIPWRIGHT_STORE=postgres` persists missions, runs, tickets, agents, and metering (RLS-scoped per workspace). `memory` is ephemeral (wiped every restart).
+- **Engine** — `SHIPWRIGHT_ENGINE=graph` runs the checkpointed LangGraph `StateGraph`; `legacy` the hand-rolled loop. Both implement the same decision graph and gates.
 
 See the [README](../README.md) for setup and the exact env switches.

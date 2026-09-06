@@ -562,13 +562,24 @@ export interface AutonomyPolicy {
   budgetCapCents: number;
   maxParallelAgents: number;
   guardrails: Record<string, boolean>;
+  /** Mission-key prefix (e.g. "M" ⇒ M-151); empty ⇒ the server default. */
+  missionKeyPrefix: string;
+  /** Directory where greenfield apps are built; empty ⇒ the server default (~/ShipwrightProjects). */
+  projectsDir: string;
 }
 
 /** Fields the PATCH /settings endpoint accepts; each is optional (partial update). */
 export type SettingsPatch = Partial<
   Pick<
     AutonomyPolicy,
-    "autonomy" | "gates" | "spendThresholdCents" | "budgetCapCents" | "maxParallelAgents" | "guardrails"
+    | "autonomy"
+    | "gates"
+    | "spendThresholdCents"
+    | "budgetCapCents"
+    | "maxParallelAgents"
+    | "guardrails"
+    | "missionKeyPrefix"
+    | "projectsDir"
   >
 >;
 

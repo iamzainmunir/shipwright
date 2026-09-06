@@ -2,7 +2,7 @@
 
 Tracing follows Shipwright's "works offline by default, real backend is a drop-in" design:
 
-  * :func:`init_telemetry` is a no-op unless tracing is switched on (``FOUNDRY_TRACING``
+  * :func:`init_telemetry` is a no-op unless tracing is switched on (``SHIPWRIGHT_TRACING``
     truthy, or an ``OTEL_EXPORTER_OTLP_ENDPOINT`` is configured).
   * With no endpoint it prints the span tree to **stdout** (``ConsoleSpanExporter``) so a
     developer sees traces with zero infrastructure; set ``OTEL_EXPORTER_OTLP_ENDPOINT`` to
@@ -63,9 +63,14 @@ def _truthy(value: str | None) -> bool:
     return (value or "").strip().lower() in {"1", "true", "yes", "on"}
 
 
+def _env(name: str, default: str = "") -> str:
+    """Read ``SHIPWRIGHT_<name>``, falling back to the legacy ``FOUNDRY_<name>``, then default."""
+    return os.environ.get(f"SHIPWRIGHT_{name}") or os.environ.get(f"FOUNDRY_{name}") or default
+
+
 def tracing_enabled() -> bool:
     """True when the operator asked for traces (explicit flag or a configured OTLP endpoint)."""
-    return _truthy(os.environ.get("FOUNDRY_TRACING")) or bool(
+    return _truthy(_env("TRACING")) or bool(
         os.environ.get("OTEL_EXPORTER_OTLP_ENDPOINT")
     )
 
@@ -89,7 +94,7 @@ def init_telemetry(service: str) -> None:
             "service.name": f"shipwright-{service}",
             "service.namespace": "shipwright",
             "service.version": os.environ.get("GIT_SHA", "dev"),
-            "deployment.environment": os.environ.get("FOUNDRY_ENV", "local"),
+            "deployment.environment": _env("ENV", "local"),
         }
     )
     provider = TracerProvider(resource=resource)

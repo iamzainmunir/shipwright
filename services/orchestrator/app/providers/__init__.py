@@ -1,6 +1,6 @@
 """Provider router — pick a concrete LLM provider from the environment.
 
-Precedence: ``FOUNDRY_PROVIDER=ollama`` (local, free) → Ollama; else Anthropic when
+Precedence: ``SHIPWRIGHT_PROVIDER=ollama`` (local, free) → Ollama; else Anthropic when
 ``ANTHROPIC_API_KEY`` is set; else ``NoModelProvider`` — which errors honestly rather than
 fabricating output. The product never falls back to a fake/"mock" model.
 """
@@ -17,6 +17,11 @@ from .claude_cli import ClaudeCliProvider
 from .ollama import OllamaProvider
 from .openai_compat import OpenAICompatibleProvider
 from .unavailable import NoModelProvider
+
+
+def _env(name: str, default: str = "") -> str:
+    """Read ``SHIPWRIGHT_<name>``, falling back to the legacy ``FOUNDRY_<name>``, then default."""
+    return os.getenv(f"SHIPWRIGHT_{name}") or os.getenv(f"FOUNDRY_{name}") or default
 
 __all__ = [
     "LLMProvider", "LLMResult", "ProviderError",
@@ -83,9 +88,9 @@ def build_provider(
             autonomy=cfg.get("autonomy") or "safe", binary=cfg.get("binary") or None,
         )
     # v2: LiteLLM is the default provider layer (plan 03). One adapter over every provider — it
-    # keeps our tool-name sanitizer + Ollama text-tool-call salvage. FOUNDRY_LLM_ADAPTER=legacy
+    # keeps our tool-name sanitizer + Ollama text-tool-call salvage. SHIPWRIGHT_LLM_ADAPTER=legacy
     # falls back to the hand-rolled adapters (rollback switch).
-    if os.getenv("FOUNDRY_LLM_ADAPTER", "litellm").strip().lower() != "legacy":
+    if _env("LLM_ADAPTER", "litellm").strip().lower() != "legacy":
         return _build_litellm(name, model, endpoint, api_key)
     if name == "ollama":
         return OllamaProvider(model=model or "qwen2.5:7b", endpoint=endpoint or "http://localhost:11434")
@@ -133,14 +138,14 @@ def _build_litellm(
 
 
 def get_provider() -> LLMProvider:
-    provider = os.getenv("FOUNDRY_PROVIDER", "").strip().lower()
-    if provider == "ollama" or os.getenv("FOUNDRY_OLLAMA_MODEL", "").strip():
-        model = os.getenv("FOUNDRY_OLLAMA_MODEL", "qwen2.5:7b").strip() or "qwen2.5:7b"
-        endpoint = os.getenv("FOUNDRY_OLLAMA_ENDPOINT", "http://localhost:11434").strip()
+    provider = _env("PROVIDER", "").strip().lower()
+    if provider == "ollama" or _env("OLLAMA_MODEL", "").strip():
+        model = _env("OLLAMA_MODEL", "qwen2.5:7b").strip() or "qwen2.5:7b"
+        endpoint = _env("OLLAMA_ENDPOINT", "http://localhost:11434").strip()
         return OllamaProvider(model=model, endpoint=endpoint)
 
     key = os.getenv("ANTHROPIC_API_KEY", "").strip()
     if key:
-        model = os.getenv("FOUNDRY_DEFAULT_MODEL", "claude-sonnet-5").strip() or "claude-sonnet-5"
+        model = _env("DEFAULT_MODEL", "claude-sonnet-5").strip() or "claude-sonnet-5"
         return AnthropicProvider(api_key=key, model=model)
     return NoModelProvider()

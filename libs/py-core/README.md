@@ -15,7 +15,7 @@ foundry-core = { path = "../../libs/py-core", editable = true }
 | `foundry_core.ids` | `new_ulid() -> str` (26-char Crockford base32), `mission_key(n) -> "FND-<n>"` (Canon §8) |
 | `foundry_core.enums` | `str` enums locked by Canon §13.3 and §5/§6 (`RunStatus`, `ModelTier`, `MissionStage`, `BlockerKind`, `AgentRoleKey`, …) |
 | `foundry_core.models` | Pydantic v2 domain models (`Org`, `Workspace`, `User`, `Mission`, `Agent`, `Blocker`, `ModelConnection`, `Skill`, `Memory`) with camelCase JSON aliases |
-| `foundry_core.config` | `CoreSettings` — shared `BaseSettings` (env prefix `FOUNDRY_`) |
+| `foundry_core.config` | `CoreSettings` — shared `BaseSettings` (env prefix `SHIPWRIGHT_`) |
 | `foundry_core.db` | `create_engine`, `create_session_factory`, `tenant_scope(...)` — async SQLAlchemy + RLS GUCs |
 
 ## Conventions (Canon §13)
@@ -47,7 +47,7 @@ m.model_dump(by_alias=True)   # -> camelCase JSON dict
 ```python
 from foundry_core import create_engine, create_session_factory, tenant_scope
 
-engine = create_engine("postgresql+psycopg://foundry:foundry@localhost:5432/foundry")
+engine = create_engine("postgresql+psycopg://shipwright:shipwright@localhost:5432/shipwright")
 Session = create_session_factory(engine)
 
 async with Session() as session:

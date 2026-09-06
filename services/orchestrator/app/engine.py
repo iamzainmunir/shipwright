@@ -340,6 +340,12 @@ class RunEngine:
         self._jira = JiraMirror(store)
         self._tickets = TicketService(store, sink=self._jira.on_ticket_event)
 
+    async def _effective_projects_root(self) -> str:
+        """Where greenfield apps are built: the workspace's configured ``projects_dir`` (Settings),
+        falling back to the global default (``SHIPWRIGHT_PROJECTS_ROOT`` → ``~/ShipwrightProjects``)."""
+        configured = ((await self.store.get_settings()).projects_dir or "").strip()
+        return configured or self.projects_root
+
     async def _github_token(self) -> str:
         """The GitHub push token. Prefers the token the user connected on the Integrations page
         (persisted in the DB, so it survives restarts), falling back to the server env token."""
@@ -1934,7 +1940,7 @@ class RunEngine:
         # Record where the deliverable lives BEFORE the (slow) build so the Details rail shows the
         # project folder immediately instead of only after the build finishes.
         if is_app and not mission.project_path:
-            planned = devloop.default_project_path(self.projects_root, mission)
+            planned = devloop.default_project_path(await self._effective_projects_root(), mission)
             await self.store.update_mission(mission_id, project_path=planned)
             mission = await self.store.get_mission(mission_id) or mission
             await self._emit(run, mission, phase.role, "status",
@@ -2057,7 +2063,7 @@ class RunEngine:
                     # Fork-join: each role-matched agent builds a disjoint part (pre-decomposed).
                     result, sb, path = await devloop.build_parallel(
                         mission, provider, agent_specs, subtasks=subtasks,
-                        projects_root=self.projects_root, make_callbacks=_make_cbs,
+                        projects_root=await self._effective_projects_root(), make_callbacks=_make_cbs,
                         # A targeted rework must NOT fall back to regenerating the whole app — that's the
                         # very behaviour we're removing. Rebuild just the failing slice(s).
                         allow_solo_fallback=not targeted,
@@ -2078,7 +2084,7 @@ class RunEngine:
                         "role": _enum_value(phase.role), "instructions": brief,
                         "agent_name": getattr(solo_agent, "name", None)}])
                     result, sb, path = await devloop.build_from_mission(
-                        mission, provider, projects_root=self.projects_root,
+                        mission, provider, projects_root=await self._effective_projects_root(),
                         on_event=on_tool, on_turn=on_turn, max_steps=40,
                     )
                 await self.store.update_mission(mission_id, project_path=path)

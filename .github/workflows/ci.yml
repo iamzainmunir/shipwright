@@ -70,13 +70,13 @@ jobs:
       postgres:
         image: postgres:16
         env:
-          POSTGRES_USER: foundry
-          POSTGRES_PASSWORD: foundry_dev
-          POSTGRES_DB: foundry
+          POSTGRES_USER: shipwright
+          POSTGRES_PASSWORD: shipwright_dev
+          POSTGRES_DB: shipwright
         ports:
           - 5432:5432
         options: >-
-          --health-cmd "pg_isready -U foundry -d foundry"
+          --health-cmd "pg_isready -U shipwright -d shipwright"
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
@@ -97,7 +97,7 @@ jobs:
       # drift (`alembic check`), and the schema is reversible (downgrade → re-upgrade).
       - name: Alembic migration gate
         env:
-          DATABASE_URL: postgresql+asyncpg://foundry:foundry_dev@localhost:5432/foundry
+          DATABASE_URL: postgresql+asyncpg://shipwright:shipwright_dev@localhost:5432/shipwright
         run: |
           set -euo pipefail
           uv run alembic upgrade head
@@ -111,9 +111,9 @@ jobs:
         env:
           PGHOST: localhost
           PGPORT: "5432"
-          PGUSER: foundry
-          PGPASSWORD: foundry_dev
-          PGDATABASE: foundry
+          PGUSER: shipwright
+          PGPASSWORD: shipwright_dev
+          PGDATABASE: shipwright
         run: |
           set -euo pipefail
           psql -v ON_ERROR_STOP=1 <<'SQL'
@@ -133,7 +133,7 @@ jobs:
           GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO rls_probe;
           GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO rls_probe;
           SQL
-          PGPASSWORD=probe psql -U rls_probe -h localhost -d foundry -v ON_ERROR_STOP=1 <<'SQL'
+          PGPASSWORD=probe psql -U rls_probe -h localhost -d shipwright -v ON_ERROR_STOP=1 <<'SQL'
           SET app.workspace_id = 'WS_A';
           INSERT INTO missions (id,key,workspace_id,title,source,priority,stage,autonomy,progress,labels,is_blocked)
             VALUES ('01RLSPROBEAAAAAAAAAAAAAAAA','RLS-PROBE-A','WS_A','probe','manual','p2','backlog','supervised',0,'[]',false);
@@ -210,22 +210,22 @@ jobs:
       postgres:
         image: pgvector/pgvector:pg16
         env:
-          POSTGRES_USER: foundry
-          POSTGRES_PASSWORD: foundry_dev
-          POSTGRES_DB: foundry
+          POSTGRES_USER: shipwright
+          POSTGRES_PASSWORD: shipwright_dev
+          POSTGRES_DB: shipwright
         ports:
           - 5432:5432
         options: >-
-          --health-cmd "pg_isready -U foundry -d foundry"
+          --health-cmd "pg_isready -U shipwright -d shipwright"
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
     env:
       PGHOST: localhost
       PGPORT: "5432"
-      PGUSER: foundry
-      PGPASSWORD: foundry_dev
-      PGDATABASE: foundry
+      PGUSER: shipwright
+      PGPASSWORD: shipwright_dev
+      PGDATABASE: shipwright
     steps:
       - uses: actions/checkout@v4
       # psql ships preinstalled on ubuntu-latest runners.

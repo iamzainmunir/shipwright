@@ -99,7 +99,7 @@ class PostgresStore:
                  seed: bool = True) -> None:
         self._dsn = dsn
         self._auto_migrate = auto_migrate  # local/dev: bring schema to head at startup
-        self._seed = seed  # seed the baseline demo fixtures into empty tables (FOUNDRY_SEED=0 to skip)
+        self._seed = seed  # seed the baseline demo fixtures into empty tables (SHIPWRIGHT_SEED=0 to skip)
         self.engine = create_async_engine(dsn, pool_pre_ping=True)
         self._maker = async_sessionmaker(self.engine, expire_on_commit=False)
         self.workspace = workspace  # the tenant this instance operates as (demo: single workspace)
@@ -167,7 +167,9 @@ class PostgresStore:
 
         async with self._sess() as s:
             n = await s.scalar(select(func.nextval(_KEY_SEQ)))
-            return f"{get_settings().mission_key_prefix}-{n}"
+            row = await s.scalar(select(AutonomyPolicyRow).limit(1))
+            prefix = ((row.mission_key_prefix if row else "") or "").strip() or get_settings().mission_key_prefix
+            return f"{prefix}-{n}"
 
     # ---- missions ---------------------------------------------------------------
     async def list_missions(self, workspace_id: str = DEMO_WS) -> list[Mission]:

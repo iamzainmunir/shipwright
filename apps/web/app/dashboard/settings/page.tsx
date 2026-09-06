@@ -408,6 +408,8 @@ export default function SettingsPage() {
       budgetCapCents: draft.budgetCapCents,
       maxParallelAgents: draft.maxParallelAgents,
       guardrails: draft.guardrails,
+      missionKeyPrefix: draft.missionKeyPrefix,
+      projectsDir: draft.projectsDir,
     };
     try {
       const updated = await updateSettings(body);
@@ -687,6 +689,65 @@ export default function SettingsPage() {
             <span className="hint">
               Cap on how many agents run at once across all missions.
               {agentCount != null ? ` The team has ${agentCount} agents.` : ""}
+            </span>
+          </div>
+
+          <div className="divider" />
+
+          <div className="field" style={{ marginBottom: 0 }}>
+            <label htmlFor="set-mission-prefix">Mission-key prefix</label>
+            <div className="row gap-16" style={{ flexWrap: "wrap", alignItems: "center" }}>
+              <input
+                id="set-mission-prefix"
+                type="text"
+                maxLength={12}
+                placeholder="M"
+                aria-label="Mission-key prefix"
+                value={draft.missionKeyPrefix}
+                onChange={(e) =>
+                  edit({ missionKeyPrefix: e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, "") })
+                }
+                style={{
+                  width: 120,
+                  fontWeight: 700,
+                  padding: "8px 12px",
+                  borderRadius: 10,
+                  border: "1px solid var(--line)",
+                  background: "var(--surface)",
+                  color: "var(--text)",
+                }}
+              />
+              <span className="hint" style={{ flex: 1, minWidth: 220 }}>
+                Prefix for new mission keys — e.g. <b>{(draft.missionKeyPrefix || "M") + "-142"}</b>.
+                Blank uses the default (<b>M</b>). Existing missions keep their keys.
+              </span>
+            </div>
+          </div>
+
+          <div className="divider" />
+
+          <div className="field" style={{ marginBottom: 0 }}>
+            <label htmlFor="set-projects-dir">Projects directory</label>
+            <input
+              id="set-projects-dir"
+              type="text"
+              placeholder="~/ShipwrightProjects"
+              aria-label="Projects directory"
+              value={draft.projectsDir}
+              onChange={(e) => edit({ projectsDir: e.target.value })}
+              style={{
+                width: "100%",
+                padding: "8px 12px",
+                borderRadius: 10,
+                border: "1px solid var(--line)",
+                background: "var(--surface)",
+                color: "var(--text)",
+                fontFamily: "var(--font-mono, ui-monospace, monospace)",
+              }}
+            />
+            <span className="hint">
+              Where greenfield apps are built on disk. Blank uses the default
+              (<b>~/ShipwrightProjects</b>).
             </span>
           </div>
         </div>

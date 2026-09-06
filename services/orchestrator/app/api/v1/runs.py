@@ -1107,6 +1107,8 @@ class SettingsPatch(_Body):
     budget_cap_cents: int | None = None
     max_parallel_agents: int | None = None
     guardrails: dict[str, bool] | None = None
+    mission_key_prefix: str | None = None
+    projects_dir: str | None = None
 
 
 @router.get("/settings", description="x-required-scope: settings:read")

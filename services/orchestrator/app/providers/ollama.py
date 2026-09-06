@@ -1,6 +1,6 @@
 """Ollama adapter (real, local). Talks to a local Ollama server's ``/api/chat`` endpoint.
 
-Selected by the router when ``FOUNDRY_PROVIDER=ollama`` (or ``FOUNDRY_OLLAMA_MODEL`` is set).
+Selected by the router when ``SHIPWRIGHT_PROVIDER=ollama`` (or ``SHIPWRIGHT_OLLAMA_MODEL`` is set).
 Local models are free, so ``cost_cents`` is always 0; token counts come from Ollama's
 ``prompt_eval_count`` / ``eval_count``. Tool-use maps to Ollama's OpenAI-style ``tools`` schema
 (models like ``qwen2.5`` support it; ``gemma2`` does not — it simply returns text).

@@ -43,7 +43,7 @@ class TicketService:
     # ---- feature gate -----------------------------------------------------------
     async def enabled(self, workspace_id: str) -> bool:
         """Effective toggle: the workspace Settings → Features flag wins; if unset, the
-        ``FOUNDRY_TICKETS`` config default applies. Off ⇒ the consumer is a no-op (domain events
+        ``SHIPWRIGHT_TICKETS`` config default applies. Off ⇒ the consumer is a no-op (domain events
         still flow to the run console); re-enabling reconciles via :meth:`backfill`."""
         from .config import get_settings
         default = get_settings().tickets_enabled

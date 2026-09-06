@@ -64,12 +64,12 @@ curl -X POST localhost:8000/api/v1/missions/FND-142/approvals -d '{"gate":"merge
 
 ## Phase 2 — Postgres persistence + Temporal worker
 
-**Postgres store** (run state survives a restart). Point `FOUNDRY_STORE=postgres` at a database:
+**Postgres store** (run state survives a restart). Point `SHIPWRIGHT_STORE=postgres` at a database:
 
 ```bash
-createdb foundry_dev   # local dev (pgvector not required for the run aggregates)
-FOUNDRY_STORE=postgres \
-DATABASE_URL="postgresql+asyncpg://<user>@127.0.0.1:5432/foundry_dev" \
+createdb shipwright_dev   # local dev (pgvector not required for the run aggregates)
+SHIPWRIGHT_STORE=postgres \
+DATABASE_URL="postgresql+asyncpg://<user>@127.0.0.1:5432/shipwright_dev" \
   uv run uvicorn app.main:app --port 8000
 # tables are auto-created + seeded on first boot (app/db_models.py, app/pgstore.py)
 ```
@@ -97,14 +97,14 @@ uv run mypy app
 Build from the **repo root** (so the editable `foundry-core` path resolves):
 
 ```bash
-docker build -f services/orchestrator/Dockerfile -t foundry-orchestrator .
-docker run -p 8000:8000 --env-file .env foundry-orchestrator
+docker build -f services/orchestrator/Dockerfile -t shipwright-orchestrator .
+docker run -p 8000:8000 --env-file .env shipwright-orchestrator
 ```
 
 ## Configuration
 
 `app/config.py` reads the environment from [`../../.env.example`](../../.env.example):
-`DATABASE_URL`, `REDIS_URL`, `TEMPORAL_HOST`, `TEMPORAL_NAMESPACE`, `FOUNDRY_ENV`,
+`DATABASE_URL`, `REDIS_URL`, `TEMPORAL_HOST`, `TEMPORAL_NAMESPACE`, `SHIPWRIGHT_ENV`,
 `LOG_LEVEL`, `ORCHESTRATOR_PORT`, `CORS_ORIGINS`. Defaults target local dev, so the service
 boots with no `.env` present.
 

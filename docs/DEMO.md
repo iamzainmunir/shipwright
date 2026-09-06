@@ -4,7 +4,7 @@ A 5–7 minute script for showing Shipwright live (or narrating the landing-page
 **what to show**, **what to say**, and **why it matters**. Screens referenced live in
 [`docs/images/`](images) and auto-play on the landing page (`/`, the *See it in action* section).
 
-> Setup once before you present: orchestrator on `FOUNDRY_ENGINE=graph` + `FOUNDRY_STORE=postgres`,
+> Setup once before you present: orchestrator on `SHIPWRIGHT_ENGINE=graph` + `SHIPWRIGHT_STORE=postgres`,
 > web on Node ≥22, at least one model connected under **Models** (a Claude Code CLI seat is the
 > quickest — no API key). See the [README](../README.md) quick start.
 

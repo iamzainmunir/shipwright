@@ -10,7 +10,7 @@ by the SAME ``_next_phase`` logic the legacy loop uses (build↔QA rework, revie
 redesign/rebuild/proceed). LangGraph checkpoints the routing state after every super-step, and a
 recursion limit is the structural equivalent of the legacy pipeline safety-stop.
 
-Selected by ``FOUNDRY_ENGINE=graph``; ``legacy`` (the default) keeps the battle-tested loop. This is
+Selected by ``SHIPWRIGHT_ENGINE=graph``; ``legacy`` (the default) keeps the battle-tested loop. This is
 built last precisely because it is the riskiest change and benefits from wiring in the finished
 ownership build, QA evidence, and ticket pieces.
 """

@@ -19,7 +19,7 @@ from foundry_core.models import AcceptanceCriterion
 @pytest.fixture()
 def artifacts_root(tmp_path, monkeypatch):
     root = tmp_path / "artifacts"
-    monkeypatch.setenv("FOUNDRY_ARTIFACTS_ROOT", str(root))
+    monkeypatch.setenv("SHIPWRIGHT_ARTIFACTS_ROOT", str(root))
     config.get_settings.cache_clear()
     yield root
     config.get_settings.cache_clear()

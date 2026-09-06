@@ -1,7 +1,7 @@
 """Shared test fixtures.
 
 Tests must be hermetic — independent of the developer's local ``.env`` (which sets
-``FOUNDRY_STORE=postgres``, ``GITHUB_REPO=…`` etc. for the running app). Without this, a configured
+``SHIPWRIGHT_STORE=postgres``, ``GITHUB_REPO=…`` etc. for the running app). Without this, a configured
 ``GITHUB_REPO`` with no token would make the merge gate re-open ("connect GitHub first") instead of
 performing the local dry-run these tests expect.
 """
@@ -19,7 +19,7 @@ def _hermetic_settings(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("GITHUB_REPO", "")
     monkeypatch.setenv("GITHUB_TOKEN", "")
     monkeypatch.setenv("GITHUB_BASE", "main")
-    monkeypatch.setenv("FOUNDRY_STORE", "memory")
+    monkeypatch.setenv("SHIPWRIGHT_STORE", "memory")
     get_settings.cache_clear()
     yield
     get_settings.cache_clear()

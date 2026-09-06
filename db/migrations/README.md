@@ -27,8 +27,8 @@ so re-applying against an existing database is safe.
 ## Apply manually with `psql`
 
 ```bash
-# uses the DATABASE_URL / POSTGRES_* from the repo root .env.example (db: foundry)
-export PGHOST=localhost PGPORT=5432 PGUSER=foundry PGPASSWORD=foundry_dev PGDATABASE=foundry
+# uses the DATABASE_URL / POSTGRES_* from the repo root .env.example (db: shipwright)
+export PGHOST=localhost PGPORT=5432 PGUSER=shipwright PGPASSWORD=shipwright_dev PGDATABASE=shipwright
 
 psql -v ON_ERROR_STOP=1 -f db/migrations/0001_init.sql
 psql -v ON_ERROR_STOP=1 -f db/migrations/0002_functions.sql
@@ -49,9 +49,9 @@ services:
   postgres:
     image: pgvector/pgvector:pg16
     environment:
-      POSTGRES_DB: foundry
-      POSTGRES_USER: foundry
-      POSTGRES_PASSWORD: foundry_dev
+      POSTGRES_DB: shipwright
+      POSTGRES_USER: shipwright
+      POSTGRES_PASSWORD: shipwright_dev
     volumes:
       - ../../db/migrations:/docker-entrypoint-initdb.d/10-migrations:ro
       - ../../db/seeds:/docker-entrypoint-initdb.d/20-seeds:ro
@@ -66,7 +66,7 @@ runner.
 
 - **RLS in Phase-0** uses `ENABLE ROW LEVEL SECURITY` (not `FORCE`) so the object
   owner running these scripts / the seed is not filtered. The Phase-1 security
-  migration adds a non-owner `foundry_app` role and `FORCE ROW LEVEL SECURITY`
+  migration adds a non-owner `shipwright_app` role and `FORCE ROW LEVEL SECURITY`
   (doc 02 §6.1) so the runtime role can never bypass tenant isolation.
 - The app sets tenant context per transaction with
   `SET LOCAL app.workspace_id = '<ulid>'` and `SET LOCAL app.org_id = '<ulid>'`;

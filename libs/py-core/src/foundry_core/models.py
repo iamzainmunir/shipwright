@@ -495,3 +495,6 @@ class AutonomyPolicy(FoundryModel):
     max_parallel_agents: int = 6
     guardrails: dict[str, bool] = Field(default_factory=_default_guardrails)
     features: dict[str, bool] = Field(default_factory=_default_features)
+    # User-configurable defaults (empty ⇒ fall back to the global config default):
+    mission_key_prefix: str = ""  # e.g. "M" ⇒ M-151; empty ⇒ SHIPWRIGHT_MISSION_PREFIX
+    projects_dir: str = ""  # where greenfield apps are built; empty ⇒ ~/ShipwrightProjects

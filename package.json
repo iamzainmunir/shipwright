@@ -3,6 +3,7 @@
   "private": true,
   "version": "0.0.0",
   "description": "Shipwright — autonomous AI engineering org (monorepo root)",
+  "license": "Apache-2.0",
   "packageManager": "pnpm@11.0.9",
   "engines": {
     "node": ">=22"
