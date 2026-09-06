@@ -4,13 +4,14 @@ from __future__ import annotations
 
 from fastapi import APIRouter
 
-from app.api.v1 import fs, missions, projects, runs, slack, tickets
+from app.api.v1 import fs, missions, projects, runs, slack, tickets, whatsapp
 
 router = APIRouter(prefix="/api/v1")
 router.include_router(missions.router)
 router.include_router(projects.router)
 router.include_router(fs.router)
 router.include_router(slack.router)
+router.include_router(whatsapp.router)
 router.include_router(runs.router)
 router.include_router(tickets.router)
 

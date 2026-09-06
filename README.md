@@ -95,7 +95,7 @@ Set per mission: **manual → assisted → supervised → autonomous**. Autonomo
 - **Models & usage** — per-agent model binding, failover, real per-run token/cost metering, budgets and rate caps.
 - **Skills & memory** — reusable skills the team auto-invokes, and a workspace memory that keeps decisions consistent across missions.
 - **Integrations** — GitHub (push/PR at the ship gate, your consent required), Jira, and a real Chrome the QA agents can drive.
-- **Notifications** — opt-in **email, WhatsApp, or Slack** alerts when a mission is blocked, needs approval, ships, or halts (configured per workspace in Settings; provider credentials stay in `.env`, never the DB).
+- **Notifications & two-way control** — opt-in **email, WhatsApp, or Slack** alerts when a mission is blocked, needs approval, ships, or halts (configured per workspace in Settings; provider credentials are stored in the DB, redacted on read). Slack and WhatsApp are **two-way**: reply for a live status (`status`, `missions`, `mission SW-142`) or resolve an approval gate from your phone — Slack **Approve/Reject** buttons, or a WhatsApp `approve SW-142` / `reject SW-142`. Every inbound request is signature-verified per provider.
 - **Configurable** — set the **mission-key prefix** (e.g. `SW-142`) and the **projects directory** per workspace in Settings; bring your own model-provider credentials.
 
 ---

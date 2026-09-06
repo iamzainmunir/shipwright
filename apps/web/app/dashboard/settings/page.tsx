@@ -45,12 +45,12 @@ const CHANNEL_HELP: Record<string, { note: string; href: string; label: string }
     label: "Gmail App Password guide",
   },
   whatsapp_twilio: {
-    note: "Create a Twilio account, enable the WhatsApp sandbox (or a real sender), and paste the credentials below. Sent to the recipient number.",
+    note: "Create a Twilio account, enable the WhatsApp sandbox (or a real sender), and paste the credentials below. Sent to the recipient number. For two-way — reply `status` for updates or `approve M-142` / `reject M-142` to resolve a gate — point Messaging's inbound webhook at /api/v1/integrations/whatsapp/twilio (verified with your Auth token).",
     href: "https://www.twilio.com/docs/whatsapp/quickstart",
     label: "Twilio WhatsApp quickstart",
   },
   whatsapp_meta: {
-    note: "Create a Meta app with WhatsApp, then paste the access token + phone-number ID below. Sent to the recipient number.",
+    note: "Create a Meta app with WhatsApp, then paste the access token + phone-number ID below. Sent to the recipient number. For two-way — reply `status` or `approve M-142` / `reject M-142` — also add a Verify token + App secret and point the Configuration webhook at /api/v1/integrations/whatsapp/meta.",
     href: "https://developers.facebook.com/docs/whatsapp/cloud-api/get-started",
     label: "Meta Cloud API get-started",
   },
@@ -78,6 +78,8 @@ const CHANNEL_FIELDS: Record<string, { key: string; label: string; secret?: bool
   whatsapp_meta: [
     { key: "whatsappToken", label: "Access token", secret: true },
     { key: "whatsappPhoneId", label: "Phone number ID", placeholder: "1234567890" },
+    { key: "whatsappVerifyToken", label: "Verify token (for two-way)", secret: true },
+    { key: "whatsappAppSecret", label: "App secret (for two-way)", secret: true },
   ],
   slack: [
     { key: "slackWebhook", label: "Incoming webhook URL", secret: true, placeholder: "https://hooks.slack.com/services/…" },

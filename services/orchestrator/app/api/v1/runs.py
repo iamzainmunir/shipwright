@@ -1120,7 +1120,7 @@ class SettingsPatch(_Body):
 # Notification provider secrets are write-only over the API — redacted on read, merged on write — so
 # the UI never sees a stored password/token/webhook but can tell (via a ``<key>Set`` bool) one is saved.
 _NOTIFY_SECRET_KEYS = {"smtpPassword", "twilioAuthToken", "whatsappToken", "slackWebhook",
-                       "slackSigningSecret"}
+                       "slackSigningSecret", "whatsappAppSecret", "whatsappVerifyToken"}
 
 
 def _public_settings(policy) -> dict:
