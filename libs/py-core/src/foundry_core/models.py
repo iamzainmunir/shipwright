@@ -511,3 +511,18 @@ class AutonomyPolicy(FoundryModel):
     def _coerce_none_dict(cls, v: object) -> object:
         """A JSON column can be NULL for rows created before the field existed — read NULL as ``{}``."""
         return v if v is not None else {}
+
+
+class Project(FoundryModel):
+    """A codebase the org can build in or edit — a local git repo. Either auto-registered when a
+    mission builds to it (``source="built"``) or added by the user (``source="registered"``).
+    Projects are the working set a multi-target mission coordinates a change across."""
+
+    id: str
+    workspace_id: str
+    name: str
+    slug: str
+    path: str
+    source: str = "registered"  # "built" | "registered"
+    created_at: datetime | None = None
+    last_activity_at: datetime | None = None

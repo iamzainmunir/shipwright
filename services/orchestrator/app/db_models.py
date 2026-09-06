@@ -333,3 +333,18 @@ class AutonomyPolicyRow(Base):
     notify_events: Mapped[dict] = mapped_column(JSON, default=dict)
     notify_email: Mapped[str] = mapped_column(String(320), default="")
     notify_whatsapp: Mapped[str] = mapped_column(String(32), default="")
+
+
+class ProjectRow(Base):
+    """A registered/built codebase (local git repo) in the project registry (plan: multi-project)."""
+
+    __tablename__ = "projects"
+    id: Mapped[str] = mapped_column(String(40), primary_key=True)
+    org_id: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    workspace_id: Mapped[str] = mapped_column(String(40), index=True)
+    name: Mapped[str] = mapped_column(String(160))
+    slug: Mapped[str] = mapped_column(String(160))
+    path: Mapped[str] = mapped_column(String(1024))
+    source: Mapped[str] = mapped_column(String(16), default="registered")
+    created_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_activity_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
