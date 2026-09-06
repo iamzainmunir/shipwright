@@ -34,6 +34,34 @@ const NOTIFY_CHANNELS: { key: string; label: string }[] = [
   { key: "whatsapp_meta", label: "WhatsApp · Meta" },
   { key: "slack", label: "Slack" },
 ];
+
+/** Per-channel setup guidance: which .env vars to set, a one-line how-to, and a docs link. */
+const CHANNEL_HELP: Record<string, { env: string; note: string; href: string; label: string }> = {
+  email: {
+    env: "SHIPWRIGHT_SMTP_HOST · _SMTP_PORT · _SMTP_USER · _SMTP_PASSWORD · _SMTP_FROM",
+    note: "Set your SMTP server in .env (a Gmail App Password, Amazon SES, Postmark, …). Mail is sent to the Email address below.",
+    href: "https://support.google.com/mail/answer/185833",
+    label: "Gmail App Password guide",
+  },
+  whatsapp_twilio: {
+    env: "SHIPWRIGHT_TWILIO_ACCOUNT_SID · _TWILIO_AUTH_TOKEN · _TWILIO_WHATSAPP_FROM",
+    note: "Create a Twilio account, enable the WhatsApp sandbox (or a real sender), and set the three vars in .env. Sent to the WhatsApp number below.",
+    href: "https://www.twilio.com/docs/whatsapp/quickstart",
+    label: "Twilio WhatsApp quickstart",
+  },
+  whatsapp_meta: {
+    env: "SHIPWRIGHT_WHATSAPP_TOKEN · _WHATSAPP_PHONE_ID",
+    note: "Create a Meta app with WhatsApp, then copy the access token + phone-number ID into .env. Sent to the WhatsApp number below.",
+    href: "https://developers.facebook.com/docs/whatsapp/cloud-api/get-started",
+    label: "Meta Cloud API get-started",
+  },
+  slack: {
+    env: "SHIPWRIGHT_SLACK_WEBHOOK",
+    note: "Create a Slack Incoming Webhook — you choose the target channel when you create it, so no channel name is needed here — and paste its URL into .env.",
+    href: "https://api.slack.com/messaging/webhooks",
+    label: "Slack Incoming Webhooks",
+  },
+};
 const NOTIFY_EVENTS: { key: string; label: string }[] = [
   { key: "blocker", label: "Blocker raised" },
   { key: "approval", label: "Ready for approval" },
@@ -790,7 +818,7 @@ export default function SettingsPage() {
       </div>
 
       {/* Section 4.5 — Notifications */}
-      <div className="card" style={{ marginBottom: 16 }}>
+      <div className="card" style={{ marginTop: 16, marginBottom: 16 }}>
         <div className="card-head">
           <h3>
             <Icon name="bell" size={16} /> Notifications
@@ -827,6 +855,53 @@ export default function SettingsPage() {
                   })}
                 </div>
               </div>
+
+              {NOTIFY_CHANNELS.some((c) => draft.notifyChannels?.[c.key]) && (
+                <div style={{ margin: "4px 0 12px", display: "grid", gap: 8 }}>
+                  {NOTIFY_CHANNELS.filter((c) => draft.notifyChannels?.[c.key]).map((c) => {
+                    const h = CHANNEL_HELP[c.key];
+                    if (!h) return null;
+                    return (
+                      <div
+                        key={c.key}
+                        style={{
+                          padding: "10px 12px",
+                          borderRadius: 10,
+                          border: "1px solid var(--line)",
+                          background: "var(--surface)",
+                        }}
+                      >
+                        <div
+                          className="row gap-8"
+                          style={{ alignItems: "center", justifyContent: "space-between" }}
+                        >
+                          <span style={{ fontWeight: 700, fontSize: 13 }}>How to set up · {c.label}</span>
+                          <a
+                            href={h.href}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="link"
+                            style={{ fontSize: 12.5, whiteSpace: "nowrap" }}
+                          >
+                            {h.label} <Icon name="external" size={12} />
+                          </a>
+                        </div>
+                        <p className="hint" style={{ margin: "4px 0 6px" }}>{h.note}</p>
+                        <code
+                          style={{
+                            fontSize: 11.5,
+                            fontFamily: "var(--font-mono, monospace)",
+                            color: "var(--brand)",
+                            wordBreak: "break-all",
+                          }}
+                        >
+                          {h.env}
+                        </code>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
 
               <div className="field" style={{ margin: "10px 0 6px" }}>
                 <label>Notify me on</label>
