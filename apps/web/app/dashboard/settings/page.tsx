@@ -857,7 +857,7 @@ export default function SettingsPage() {
           <SwitchRow
             icon="bell"
             title="Enable notifications"
-            hint="Alert the channels below when the events you pick happen. Provider credentials (SMTP, Twilio, Meta, Slack) are configured server-side in .env; recipients live here."
+            hint="Alert the channels you pick when a mission is blocked, needs approval, ships, or halts. Enter each channel's credentials right here — secrets are stored securely and never shown again."
             checked={draft.notifyEnabled}
             onChange={(next) => edit({ notifyEnabled: next })}
             last={!draft.notifyEnabled}
