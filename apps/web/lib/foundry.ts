@@ -637,7 +637,12 @@ export const getSettings = () => api.get<AutonomyPolicy>(`${V1}/settings`);
 export const updateSettings = (patch: SettingsPatch) =>
   api.patch<AutonomyPolicy>(`${V1}/settings`, patch);
 /** Send a test notification to every enabled channel (using the stored credentials). */
-export const sendNotifyTest = () => api.post<{ sent: string[] }>(`${V1}/settings/notify-test`);
+export type NotifyTestResult = {
+  sent: string[];
+  skipped: string[];
+  failed: { channel: string; error: string }[];
+};
+export const sendNotifyTest = () => api.post<NotifyTestResult>(`${V1}/settings/notify-test`);
 
 /** Ordered autonomy levels with human copy for the Settings dial. */
 export const AUTONOMY_LEVELS: { key: AutonomyLevel; label: string; hint: string }[] = [

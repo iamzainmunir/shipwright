@@ -13,6 +13,7 @@ import {
   GATE_COPY,
   GUARDRAIL_COPY,
   type Metrics,
+  type NotifyTestResult,
   type SettingsPatch,
   getFeatures,
   getMetrics,
@@ -36,11 +37,14 @@ const NOTIFY_CHANNELS: { key: string; label: string }[] = [
   { key: "whatsapp_meta", label: "WhatsApp · Meta" },
   { key: "slack", label: "Slack" },
 ];
+const CHANNEL_LABEL: Record<string, string> = Object.fromEntries(
+  NOTIFY_CHANNELS.map((c) => [c.key, c.label]),
+);
 
 /** Per-channel setup guidance: a one-line how-to and a docs link (credentials are entered below). */
 const CHANNEL_HELP: Record<string, { note: string; href: string; label: string }> = {
   email: {
-    note: "Enter your SMTP details below (a Gmail App Password, Amazon SES, Postmark, …). Mail is sent to the recipient email.",
+    note: "Enter your SMTP details below (a Gmail App Password, Amazon SES, Postmark, …). Mail is sent to the recipient email. For two-way — reply to an alert with `approve SW-142` / `reject SW-142` or `status` — also add your IMAP host below; Shipwright polls the mailbox (no public URL needed) and only acts on replies from the allowed senders.",
     href: "https://support.google.com/mail/answer/185833",
     label: "Gmail App Password guide",
   },
@@ -55,9 +59,9 @@ const CHANNEL_HELP: Record<string, { note: string; href: string; label: string }
     label: "Meta Cloud API get-started",
   },
   slack: {
-    note: "Paste an Incoming Webhook URL for alerts (you pick the channel when you create it). For two-way — status commands and Approve/Reject buttons — also add your app's Signing secret and point its Slash Command + Interactivity request URLs at /api/v1/integrations/slack/commands and …/interactivity.",
-    href: "https://api.slack.com/messaging/webhooks",
-    label: "Slack Incoming Webhooks",
+    note: "Paste an Incoming Webhook URL for alerts (you pick the channel when you create it). For two-way — `/shipwright` status commands + Approve/Reject buttons — use Socket Mode (no public URL): enable Socket Mode on your Slack app, add a Bot token (xoxb-…, scope chat:write) and an App-level token (xapp-…, scope connections:write) below, and create a /shipwright slash command. See the setup guide.",
+    href: "https://api.slack.com/apis/socket-mode",
+    label: "Slack Socket Mode guide",
   },
 };
 
@@ -69,21 +73,28 @@ const CHANNEL_FIELDS: Record<string, { key: string; label: string; secret?: bool
     { key: "smtpUser", label: "Username", placeholder: "you@gmail.com" },
     { key: "smtpPassword", label: "Password", secret: true },
     { key: "smtpFrom", label: "From (optional)", placeholder: "Shipwright <you@gmail.com>" },
+    { key: "imapHost", label: "IMAP host (for two-way)", placeholder: "imap.gmail.com" },
+    { key: "imapPassword", label: "IMAP password (blank = same as SMTP)", secret: true },
+    { key: "emailAllowedSenders", label: "Allowed reply senders (blank = recipient)", placeholder: "you@gmail.com, teammate@co.com" },
   ],
   whatsapp_twilio: [
     { key: "twilioAccountSid", label: "Account SID", placeholder: "AC…" },
     { key: "twilioAuthToken", label: "Auth token", secret: true },
     { key: "twilioWhatsappFrom", label: "WhatsApp sender", placeholder: "whatsapp:+14155238886" },
+    { key: "whatsappAllowedSenders", label: "Allowed reply senders (blank = recipient)", placeholder: "+14155551234, +14155559999" },
   ],
   whatsapp_meta: [
     { key: "whatsappToken", label: "Access token", secret: true },
     { key: "whatsappPhoneId", label: "Phone number ID", placeholder: "1234567890" },
     { key: "whatsappVerifyToken", label: "Verify token (for two-way)", secret: true },
     { key: "whatsappAppSecret", label: "App secret (for two-way)", secret: true },
+    { key: "whatsappAllowedSenders", label: "Allowed reply senders (blank = recipient)", placeholder: "+14155551234, +14155559999" },
   ],
   slack: [
-    { key: "slackWebhook", label: "Incoming webhook URL", secret: true, placeholder: "https://hooks.slack.com/services/…" },
-    { key: "slackSigningSecret", label: "Signing secret (for commands + approvals)", secret: true },
+    { key: "slackWebhook", label: "Incoming webhook URL (for alerts)", secret: true, placeholder: "https://hooks.slack.com/services/…" },
+    { key: "slackBotToken", label: "Bot token (two-way · xoxb-…)", secret: true },
+    { key: "slackAppToken", label: "App-level token (two-way · xapp-…)", secret: true },
+    { key: "slackSigningSecret", label: "Signing secret (only if using Request URLs)", secret: true },
   ],
 };
 
@@ -92,6 +103,19 @@ function channelIcon(key: string): ReactNode {
   if (key === "slack") return <BrandIcon kind="slack" name="Slack" size={15} />;
   const emoji: Record<string, string> = { email: "✉️", whatsapp_twilio: "💬", whatsapp_meta: "💬" };
   return <span aria-hidden style={{ fontSize: 14 }}>{emoji[key] ?? "🔔"}</span>;
+}
+
+/** Whether a channel has the minimum credentials to send — mirrors the backend's readiness check.
+ * Secrets read back redacted, so we accept either the value or its `<key>Set` marker. */
+function channelConfigured(key: string, d: AutonomyPolicy): boolean {
+  const c = (d.notifyConfig ?? {}) as Record<string, unknown>;
+  const has = (k: string) => Boolean(c[k]) || Boolean(c[`${k}Set`]);
+  if (key === "email") return has("smtpHost") && Boolean(d.notifyEmail);
+  if (key === "whatsapp_twilio")
+    return has("twilioAccountSid") && has("twilioAuthToken") && has("twilioWhatsappFrom") && Boolean(d.notifyWhatsapp);
+  if (key === "whatsapp_meta") return has("whatsappToken") && has("whatsappPhoneId") && Boolean(d.notifyWhatsapp);
+  if (key === "slack") return has("slackWebhook");
+  return false;
 }
 const NOTIFY_EVENTS: { key: string; label: string }[] = [
   { key: "blocker", label: "Blocker raised" },
@@ -433,10 +457,12 @@ export default function SettingsPage() {
   const [saving, setSaving] = useState(false);
   const [justSaved, setJustSaved] = useState(false);
   const [testing, setTesting] = useState(false);
+  const [testResult, setTestResult] = useState<NotifyTestResult | null>(null);
 
   async function testNotify() {
     if (!draft) return;
     setTesting(true);
+    setTestResult(null);
     try {
       // persist the on-screen config first, so the test uses exactly what you see
       await updateSettings({
@@ -446,12 +472,15 @@ export default function SettingsPage() {
         notifyWhatsapp: draft.notifyWhatsapp,
         notifyConfig: draft.notifyConfig,
       });
-      const { sent } = await sendNotifyTest();
-      toast(
-        sent.length ? `Test sent to: ${sent.join(", ")}` : "No channels sent — enable one and add its credentials",
-        undefined,
-        sent.length ? "ok" : "warn",
-      );
+      const res = await sendNotifyTest();
+      setTestResult(res);
+      const tone = res.failed.length ? "err" : res.sent.length ? "ok" : "warn";
+      const msg = res.sent.length
+        ? `Test sent to ${res.sent.length} channel${res.sent.length > 1 ? "s" : ""}`
+        : res.failed.length
+          ? "Test failed — see details below"
+          : "No channels ready — enable one and add its credentials";
+      toast(msg, undefined, tone);
     } catch (e) {
       toast("Test failed", isApiError(e) ? e.message : undefined, "err");
     } finally {
@@ -910,6 +939,21 @@ export default function SettingsPage() {
                         style={{ ...chipStyle(on), display: "inline-flex", alignItems: "center", gap: 6 }}
                       >
                         {channelIcon(c.key)} {c.label}
+                        {on && (
+                          <span
+                            aria-hidden
+                            title={channelConfigured(c.key, draft) ? "Configured" : "Needs credentials"}
+                            style={{
+                              width: 7,
+                              height: 7,
+                              borderRadius: "50%",
+                              marginLeft: 2,
+                              background: channelConfigured(c.key, draft)
+                                ? "var(--ok, #16a34a)"
+                                : "var(--warn, #d97706)",
+                            }}
+                          />
+                        )}
                       </button>
                     );
                   })}
@@ -1036,6 +1080,48 @@ export default function SettingsPage() {
                   <Icon name="bolt" size={13} /> {testing ? "Sending…" : "Send test"}
                 </Button>
               </div>
+
+              {testResult && (
+                <div
+                  style={{
+                    marginTop: 10,
+                    borderRadius: 12,
+                    border: "1px solid var(--line)",
+                    background: "var(--surface)",
+                    overflow: "hidden",
+                  }}
+                >
+                  {[
+                    ...testResult.sent.map((c) => ({ c, kind: "ok" as const, msg: "Delivered" })),
+                    ...testResult.failed.map((f) => ({ c: f.channel, kind: "err" as const, msg: f.error })),
+                    ...testResult.skipped.map((c) => ({ c, kind: "warn" as const, msg: "Skipped — add credentials" })),
+                  ].map((r, i) => (
+                    <div
+                      key={r.c + i}
+                      className="row gap-8"
+                      style={{
+                        alignItems: "center",
+                        padding: "8px 12px",
+                        borderTop: i === 0 ? "none" : "1px solid var(--line)",
+                        fontSize: 13,
+                      }}
+                    >
+                      <span aria-hidden style={{ fontSize: 13 }}>
+                        {r.kind === "ok" ? "✅" : r.kind === "err" ? "⛔️" : "⚠️"}
+                      </span>
+                      <span style={{ fontWeight: 600, minWidth: 130 }}>
+                        {CHANNEL_LABEL[r.c] ?? r.c}
+                      </span>
+                      <span
+                        className="hint"
+                        style={{ margin: 0, color: r.kind === "err" ? "var(--danger, #c0392b)" : undefined }}
+                      >
+                        {r.msg}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
             </>
           )}
         </div>

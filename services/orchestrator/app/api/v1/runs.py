@@ -1120,7 +1120,8 @@ class SettingsPatch(_Body):
 # Notification provider secrets are write-only over the API — redacted on read, merged on write — so
 # the UI never sees a stored password/token/webhook but can tell (via a ``<key>Set`` bool) one is saved.
 _NOTIFY_SECRET_KEYS = {"smtpPassword", "twilioAuthToken", "whatsappToken", "slackWebhook",
-                       "slackSigningSecret", "whatsappAppSecret", "whatsappVerifyToken"}
+                       "slackSigningSecret", "whatsappAppSecret", "whatsappVerifyToken",
+                       "slackAppToken", "slackBotToken", "imapPassword"}
 
 
 def _public_settings(policy) -> dict:
@@ -1157,10 +1158,10 @@ async def update_settings(body: SettingsPatch) -> dict:
 
 @router.post("/settings/notify-test", description="x-required-scope: settings:write")
 async def notify_test() -> dict:
-    """Send a test notification to every enabled channel (using the stored credentials)."""
+    """Send a test notification to every enabled channel; returns a per-channel breakdown
+    (``sent`` / ``skipped`` / ``failed`` with reasons) for the Settings UI."""
     from ...notifier import Notifier
-    sent = await Notifier(get_store()).send_test(DEMO_WS)
-    return {"sent": sent}
+    return await Notifier(get_store()).send_test(DEMO_WS)
 
 
 # ---- workspace metrics (Command Center) -----------------------------------------

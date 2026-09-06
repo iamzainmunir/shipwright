@@ -27,33 +27,50 @@ credentials or recipient are missing is skipped silently — a notification neve
 
 Both Slack and WhatsApp accept inbound messages. Two kinds:
 
-- **Status queries** (read-only): `status`, `missions`, `mission <KEY>`, `tickets <KEY>`, `models`, `help`.
+- **Status queries** (read-only): `status`, `missions`, `mission <KEY>`, `tickets`, `models`, `help`.
 - **Approvals**: resolve the mission's open approval gate.
-  - **Slack** — the approval alert carries **Approve / Reject** buttons.
-  - **WhatsApp** — reply `approve <KEY>` or `reject <KEY>` (e.g. `approve SW-142`).
+  - **Slack** — the approval alert carries **Approve / Reject** buttons; `/shipwright status` for queries.
+  - **WhatsApp / Email** — reply `approve <KEY>` or `reject <KEY>` (e.g. `approve SW-142`), or `status`.
 
-Every inbound request is **signature-verified** against your stored credentials before Shipwright
-acts — an unsigned or tampered request is rejected with `401`.
+Each channel has its own trust boundary: **Slack & WhatsApp** are cryptographically signed (an
+unsigned/tampered request is rejected); **Email** (unsigned by nature) is gated by a **sender
+allow-list** — only replies from addresses you list are ever acted on.
 
-> Inbound webhooks need a **public URL**. In local dev, expose the orchestrator (`:8000`) with a
-> tunnel (`cloudflared tunnel --url http://localhost:8000`, `ngrok http 8000`, …) and use that host
-> in the webhook URLs below.
+**Which channels need a public URL?**
 
-### Slack
+| Channel | Transport | Public URL / tunnel? |
+| --- | --- | --- |
+| **Email** | IMAP polling (we reach out to the mailbox) | **No** — works anywhere |
+| **Slack** | Socket Mode (outbound WebSocket) | **No** — works behind a firewall |
+| **WhatsApp** (Twilio / Meta) | Inbound webhook | **Yes** — a tunnel in local dev |
 
-1. Create a Slack app with an **Incoming Webhook**; paste the webhook URL in Settings.
-2. For two-way, also paste the app's **Signing secret**, then set the request URLs:
-   - **Slash Commands** → `https://<host>/api/v1/integrations/slack/commands`
-   - **Interactivity** → `https://<host>/api/v1/integrations/slack/interactivity`
+### Slack (Socket Mode — recommended, no tunnel)
 
-### WhatsApp · Twilio
+Fastest path: create the app **from the manifest** in [`slack-app-manifest.yaml`](./slack-app-manifest.yaml)
+(it pre-sets the `/shipwright` command, Socket Mode, and scopes). Then:
+
+1. **Basic Information → App-Level Tokens** → generate a token with scope `connections:write` → copy the `xapp-…`.
+2. **Install App** → copy the Bot User OAuth Token (`xoxb-…`, scope `chat:write`).
+3. **Settings → Notifications → Slack**: paste the **Bot token** + **App-level token**, Save. (Keep the Incoming Webhook for the outbound alerts.)
+4. `/invite @Shipwright` into your channel, then type `/shipwright status`.
+
+Shipwright opens the WebSocket automatically once both tokens are saved (within ~30s; restart the orchestrator if you change tokens later). The HTTP Request-URL endpoints (`/api/v1/integrations/slack/commands` + `…/interactivity`) still exist if you'd rather run in HTTP mode with a Signing secret + tunnel.
+
+### Email (IMAP polling — no tunnel)
+
+1. Enter your **SMTP** details (used for both the alert and the reply).
+2. Add your **IMAP host** (e.g. `imap.gmail.com`). IMAP password defaults to the SMTP password; override it if different.
+3. Set **Allowed reply senders** (defaults to the recipient) — only these addresses can approve/query.
+4. Reply to any Shipwright alert with `approve SW-142`, `reject SW-142`, or `status`. Shipwright polls the mailbox every ~30s, acts, and replies. It reads only unseen replies to its own alerts and never touches mail from other senders.
+
+### WhatsApp · Twilio (needs a public URL)
 
 1. Enable the WhatsApp sandbox (or a real sender) and paste Account SID / Auth token / sender.
 2. Under **Messaging → "A message comes in"**, set the inbound webhook to
    `https://<host>/api/v1/integrations/whatsapp/twilio` (verified with your Auth token; replies go
    back inline via TwiML).
 
-### WhatsApp · Meta (Cloud API)
+### WhatsApp · Meta / Cloud API (needs a public URL)
 
 1. Paste the **Access token** + **Phone-number ID**.
 2. For two-way, add a **Verify token** (any string you choose) and the app's **App secret**.
@@ -61,3 +78,7 @@ acts — an unsigned or tampered request is rejected with `401`.
    `https://<host>/api/v1/integrations/whatsapp/meta` and the same Verify token. Meta calls it once
    with a `GET` challenge (echoed back when the token matches); inbound messages arrive as `POST`
    requests signed with the App secret, and replies go out via the Cloud API.
+
+> For the WhatsApp channels only, expose the orchestrator (`:8000`) with a tunnel in local dev —
+> `cloudflared tunnel --url http://localhost:8000` or `ngrok http 8000` — and use that host above.
+> (Note: `:8000` is the orchestrator/API, **not** `:3000` which is the web UI.)

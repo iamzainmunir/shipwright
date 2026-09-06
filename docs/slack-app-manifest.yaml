@@ -1,0 +1,36 @@
+# Shipwright — Slack app manifest (Socket Mode, no public URL needed).
+#
+# Fastest setup: https://api.slack.com/apps → "Create New App" → "From an app manifest" →
+# pick your workspace → paste this → Create. (To update an existing app instead, open it →
+# "Features → App Manifest" → paste → Save.)
+#
+# Then finish in the app:
+#   1. Basic Information → App-Level Tokens → "Generate Token and Scopes" → add scope
+#      `connections:write` → copy the `xapp-…` token.
+#   2. Install App → Install to Workspace → copy the Bot User OAuth Token (`xoxb-…`).
+#   3. In Shipwright → Settings → Notifications → Slack: paste the Bot token + App-level token, Save.
+#   4. Invite the bot to your channel (`/invite @Shipwright`) and type `/shipwright status`.
+display_information:
+  name: Shipwright
+  description: Status and approvals for your Shipwright missions.
+  background_color: "#0b1220"
+features:
+  bot_user:
+    display_name: Shipwright
+    always_online: true
+  slash_commands:
+    - command: /shipwright
+      description: Shipwright status & controls
+      usage_hint: status | missions | mission <KEY> | tickets | models | help
+      should_escape: false
+oauth_config:
+  scopes:
+    bot:
+      - commands
+      - chat:write
+settings:
+  interactivity:
+    is_enabled: true
+  org_deploy_enabled: false
+  socket_mode_enabled: true
+  token_rotation_enabled: false

@@ -7,7 +7,13 @@ import hmac
 from datetime import UTC, datetime
 
 from app.store import InMemoryStore
-from app.whatsapp_integration import handle_message, verify_meta, verify_twilio
+from app.whatsapp_integration import (
+    handle_message,
+    number_allowed,
+    parse_numbers,
+    verify_meta,
+    verify_twilio,
+)
 from foundry_core.enums import BlockerKind, BlockerSeverity
 from foundry_core.ids import new_ulid
 from foundry_core.models import Blocker
@@ -22,6 +28,15 @@ def test_verify_twilio_accepts_valid_and_rejects_bad():
     assert verify_twilio(token, url, {**params, "Body": "x"}, sig) is False  # tampered params
     assert verify_twilio("wrong", url, params, sig) is False                 # wrong token
     assert verify_twilio("", url, params, sig) is False                      # not configured
+
+
+def test_number_allowed_matches_by_digits():
+    allowed = parse_numbers("+1 415 555 1234, +1 415 555 9999")
+    assert number_allowed("whatsapp:+14155551234", allowed) is True   # Twilio format
+    assert number_allowed("14155551234", allowed) is True             # Meta format (digits)
+    assert number_allowed("whatsapp:+14155550000", allowed) is False  # not on the list
+    assert number_allowed("whatsapp:+14155551234", []) is False       # empty list → deny all
+    assert number_allowed("", allowed) is False                       # no sender → deny
 
 
 def test_verify_meta_accepts_valid_and_rejects_bad():

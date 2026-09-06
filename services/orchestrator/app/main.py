@@ -87,6 +87,24 @@ async def _jira_drain_loop() -> None:
         await JiraMirror(get_store()).run_forever(DEMO_WS)
 
 
+async def _slack_socket_loop() -> None:
+    """Two-way Slack over Socket Mode (no public URL). Inert unless the Slack channel + app/bot
+    tokens are configured in Settings (Rule 0)."""
+    from app.slack_socket import run_forever
+    from app.state import get_engine
+
+    await run_forever(get_store(), get_engine())
+
+
+async def _email_poll_loop() -> None:
+    """Two-way Email over IMAP polling (no public URL). Inert unless the email channel + IMAP
+    credentials are configured in Settings (Rule 0)."""
+    from app.email_poller import run_forever
+    from app.state import get_engine
+
+    await run_forever(get_store(), get_engine())
+
+
 def create_app(settings: Settings | None = None) -> FastAPI:
     settings = settings or get_settings()
     configure_logging(settings.log_level, settings.env)
@@ -115,12 +133,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         # Optional Jira mirror: a per-workspace outbox drain loop. No-op (never touches the network)
         # unless the jira feature + integration credentials are configured — safe to always start.
         jira_task = asyncio.create_task(_jira_drain_loop())
+        # Two-way integrations: both no-op until their channel + credentials are configured.
+        slack_task = asyncio.create_task(_slack_socket_loop())
+        email_task = asyncio.create_task(_email_poll_loop())
         try:
             yield
         finally:
-            jira_task.cancel()
-            with contextlib.suppress(asyncio.CancelledError, Exception):
-                await jira_task
+            for task in (jira_task, slack_task, email_task):
+                task.cancel()
+            for task in (jira_task, slack_task, email_task):
+                with contextlib.suppress(asyncio.CancelledError, Exception):
+                    await task
             # Terminate any Run-app preview servers this process spawned, so their ports/PIDs
             # don't leak past shutdown.
             with contextlib.suppress(Exception):

@@ -19,7 +19,13 @@ import httpx
 from fastapi import APIRouter, Request, Response, status
 
 from ...state import get_engine, get_store
-from ...whatsapp_integration import handle_message, verify_meta, verify_twilio
+from ...whatsapp_integration import (
+    handle_message,
+    number_allowed,
+    parse_numbers,
+    verify_meta,
+    verify_twilio,
+)
 
 router = APIRouter()
 
@@ -30,6 +36,15 @@ async def _config() -> dict:
     """The workspace's ``notify_config`` (DB-stored provider credentials)."""
     prefs = await get_store().get_settings()
     return dict(getattr(prefs, "notify_config", None) or {})
+
+
+async def _allowed_senders() -> list[str]:
+    """Allow-listed inbound numbers — ``whatsappAllowedSenders`` (comma-separated), defaulting to
+    the outbound recipient. A signed webhook proves the *channel*; this proves the *sender*."""
+    prefs = await get_store().get_settings()
+    cfg = dict(getattr(prefs, "notify_config", None) or {})
+    raw = str(cfg.get("whatsappAllowedSenders") or "").strip() or (getattr(prefs, "notify_whatsapp", "") or "")
+    return parse_numbers(raw)
 
 
 def _twiml(text: str) -> Response:
@@ -46,6 +61,8 @@ async def whatsapp_twilio(request: Request):
     sig = request.headers.get("X-Twilio-Signature", "")
     if not verify_twilio(str(cfg.get("twilioAuthToken") or ""), str(request.url), form, sig):
         return Response(status_code=status.HTTP_401_UNAUTHORIZED, content="invalid signature")
+    if not number_allowed(form.get("From", ""), await _allowed_senders()):
+        return _twiml("")  # sender not authorized — acknowledge without acting
     reply = await handle_message(form.get("Body", ""), get_store(), get_engine())
     return _twiml(reply)
 
@@ -69,7 +86,7 @@ async def whatsapp_meta(request: Request):
     if not verify_meta(str(cfg.get("whatsappAppSecret") or ""), raw, sig):
         return Response(status_code=status.HTTP_401_UNAUTHORIZED, content="invalid signature")
     text, sender = _parse_meta(raw)
-    if text and sender:
+    if text and sender and number_allowed(sender, await _allowed_senders()):
         reply = await handle_message(text, get_store(), get_engine())
         await _send_meta_reply(cfg, sender, reply)
     return {"ok": True}  # Meta requires a fast 200; the reply goes out via the send API

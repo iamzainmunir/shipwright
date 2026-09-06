@@ -26,6 +26,7 @@ dependencies = [
     "tenacity>=9",                            # system-edge retries (Jira HTTP, git push) ONLY
     "atlassian-python-api>=4.0",              # Jira Cloud REST v3 mirror (thin facade over it)
     "playwright>=1.49",                       # QA evidence: screenshots / video / trace
+    "slack-sdk>=3.33",                        # Slack Socket Mode client (two-way, no public URL)
 ]
 
 [dependency-groups]

@@ -15,9 +15,7 @@ import base64
 import hashlib
 import hmac
 
-from foundry_core.enums import ApprovalDecision, BlockerKind
-
-from .slack_integration import resolve_command
+from .inbound import resolve_text
 
 
 def verify_twilio(auth_token: str, url: str, params: dict[str, str], signature: str) -> bool:
@@ -37,31 +35,25 @@ def verify_meta(app_secret: str, raw_body: bytes, signature: str) -> bool:
     return hmac.compare_digest(expected, signature)
 
 
+def parse_numbers(raw: str) -> list[str]:
+    """Parse a comma/semicolon-separated list of phone numbers."""
+    return [p.strip() for p in (raw or "").replace(";", ",").split(",") if p.strip()]
+
+
+def _digits(value: str) -> str:
+    return "".join(ch for ch in (value or "") if ch.isdigit())
+
+
+def number_allowed(from_raw: str, allowed: list[str]) -> bool:
+    """True iff the inbound WhatsApp sender is on the allow-list (compared by digits only, so
+    ``whatsapp:+1 415…`` and ``1415…`` match). A signed webhook only proves the message came via
+    *your* provider account — this proves *who* sent it, the way email gates on the sender."""
+    sender = _digits(from_raw)
+    if not sender or not allowed:
+        return False
+    return any(_digits(a) == sender for a in allowed if _digits(a))
+
+
 async def handle_message(text: str, store, engine) -> str:
-    """Parse an inbound WhatsApp message → a reply string."""
-    parts = (text or "").strip().split()
-    if not parts:
-        return "Send `status`, `missions`, `mission <KEY>`, or `approve/reject <KEY>`."
-    cmd = parts[0].lower()
-
-    if cmd in ("approve", "reject") and len(parts) > 1:
-        key = parts[1]
-        mission = await store.get_mission(key)
-        if mission is None:
-            return f"Mission {key} not found."
-        pending = [
-            b for b in await store.list_blockers()
-            if b.mission_id == mission.id and b.kind in (BlockerKind.APPROVAL, "approval")
-        ]
-        if not pending:
-            return f"No pending approval on {key}."
-        decision = ApprovalDecision.APPROVE if cmd == "approve" else ApprovalDecision.REJECT
-        try:
-            await engine.resolve_blocker(pending[0].id, decision, actor="whatsapp", note="via WhatsApp")
-        except Exception as exc:  # noqa: BLE001 — reply with the error, never 500 the webhook
-            return f"Couldn't resolve {key}: {exc}"
-        return f"{'✅ Approved' if cmd == 'approve' else '🛑 Rejected'} {key}."
-
-    # status/missions/mission/tickets/models/help — reuse the shared resolver's text
-    result = await resolve_command(text, store)
-    return result.get("text", "OK")
+    """Parse an inbound WhatsApp message → a reply string (shared brain, attributed to WhatsApp)."""
+    return await resolve_text(text, store, engine, actor="whatsapp")

@@ -49,11 +49,69 @@ def _env(name: str, default: str = "") -> str:
     return os.getenv(f"SHIPWRIGHT_{name}") or os.getenv(f"FOUNDRY_{name}") or default
 
 
+def _friendly_error(raw: str) -> str:
+    """Translate a raw provider/stdlib error into a short, actionable hint for the Settings UI."""
+    low = raw.lower()
+    if "protocol" in low and "http" in low:
+        return "Webhook URL must start with https:// — paste the full Incoming Webhook URL."
+    if "ascii" in low and "encode" in low:
+        return "A field contains an invalid character (e.g. a pasted non-breaking space) — retype it."
+    if "authentication" in low or "username and password" in low or "5.7.8" in low or "invalid_auth" in low:
+        return "Login failed — check the username/token (Gmail needs an App Password, not your login)."
+    if "getaddrinfo" in low or "name or service" in low or "nodename" in low:
+        return "Host not found — check the server address."
+    if "timed out" in low or "timeout" in low:
+        return "Connection timed out — check the host/port and your network."
+    return raw[:140]
+
+
 def _cfg(prefs, key: str, env_name: str, default: str = "") -> str:
     """A notification setting: prefer the DB-stored ``notify_config[key]`` (configured in the UI),
     fall back to the legacy ``SHIPWRIGHT_/FOUNDRY_<env_name>`` env var, then the default."""
     value = str((getattr(prefs, "notify_config", None) or {}).get(key) or "").strip()
     return value or _env(env_name, default)
+
+
+def clean_header(value: str) -> str:
+    """Strip characters that crash smtplib's (ASCII) envelope commands from a header/address —
+    notably the non-breaking space (``\\xa0``) and zero-width chars that sneak in via copy-paste."""
+    return (value or "").replace("\xa0", " ").replace("​", "").replace("﻿", "").strip()
+
+
+def clean_secret(value: str) -> str:
+    """Normalize a credential (SMTP/IMAP password, token). Gmail App Passwords are shown as four
+    space-separated groups (often with non-breaking spaces) but must be sent with NO whitespace —
+    and IMAP/SMTP encode commands as ASCII, so a stray ``\\xa0`` crashes login. Strip all whitespace."""
+    return "".join((value or "").split())
+
+
+async def send_email(prefs, to_addr: str, subject: str, body: str) -> None:
+    """Send one email via the workspace's SMTP settings to an arbitrary recipient. Shared by the
+    outbound alerts (recipient = ``notify_email``) and the two-way IMAP poller (recipient = the
+    person who replied). No-op when SMTP or the recipient is unconfigured."""
+    host = clean_header(_cfg(prefs, "smtpHost", "SMTP_HOST"))
+    to_addr = clean_header(to_addr)
+    if not (host and to_addr):
+        return
+    subject = clean_header(subject)
+    user = clean_header(_cfg(prefs, "smtpUser", "SMTP_USER"))
+    from_addr = clean_header(_cfg(prefs, "smtpFrom", "SMTP_FROM") or user or "shipwright@localhost")
+    port = int(_cfg(prefs, "smtpPort", "SMTP_PORT", "587") or "587")
+    password = clean_secret(_cfg(prefs, "smtpPassword", "SMTP_PASSWORD"))
+    use_tls = _cfg(prefs, "smtpTls", "SMTP_TLS", "1").lower() not in {"0", "false", "no", "off"}
+
+    def _send() -> None:
+        msg = EmailMessage()
+        msg["Subject"], msg["From"], msg["To"] = subject, from_addr, to_addr
+        msg.set_content(body)
+        with smtplib.SMTP(host, port, timeout=_TIMEOUT) as smtp:
+            if use_tls:
+                smtp.starttls(context=ssl.create_default_context())
+            if user:
+                smtp.login(user, password)
+            smtp.send_message(msg)
+
+    await asyncio.to_thread(_send)  # smtplib is blocking
 
 
 class Notifier:
@@ -92,32 +150,55 @@ class Notifier:
             body=f"{mission.key} ({mission.title}) halted and needs your attention.\n\n{message}".strip(),
         )
 
-    async def send_test(self, workspace_id: str) -> list[str]:
+    async def send_test(self, workspace_id: str) -> dict:
         """Send a test message to every *enabled* channel (ignores the event filter) — powers the
-        Settings "Send test" button. Returns the channels attempted; a channel with no credentials
-        skips silently, so a name here means "tried", not "guaranteed delivered"."""
+        Settings "Send test" button. Returns a per-channel breakdown so the UI can tell the user
+        exactly what happened: ``{"sent": [...], "skipped": [...], "failed": [{channel, error}]}``.
+        A channel missing credentials is *skipped* (not failed); a channel that errored reports why."""
+        result: dict = {"sent": [], "skipped": [], "failed": []}
         try:
             prefs = await self._store.get_settings(workspace_id)
         except Exception as exc:  # noqa: BLE001
             log.warning("notify.test_prefs_failed", error=str(exc))
-            return []
+            return result
         channels = getattr(prefs, "notify_channels", None) or {}
         subject = "[Shipwright] Test notification"
-        body = "✅ Your Shipwright notifications are working — this is a test."
+        body = "Your Shipwright notifications are working — this is a test. ✅"
         senders = {
             CH_EMAIL: self._send_email, CH_TWILIO: self._send_twilio,
             CH_META: self._send_meta, CH_SLACK: self._send_slack,
         }
-        sent: list[str] = []
         for key, fn in senders.items():
             if not channels.get(key, False):
                 continue
+            if not self._channel_ready(prefs, key):
+                result["skipped"].append(key)
+                continue
             try:
                 await fn(prefs, subject, body)
-                sent.append(key)
+                result["sent"].append(key)
             except Exception as exc:  # noqa: BLE001 — report per-channel, never raise
                 log.warning("notify.test_failed", channel=key, error=str(exc))
-        return sent
+                result["failed"].append({"channel": key, "error": _friendly_error(str(exc))})
+        return result
+
+    @staticmethod
+    def _channel_ready(prefs, key: str) -> bool:
+        """Whether a channel has the minimum credentials to even attempt a send."""
+        if key == CH_EMAIL:
+            return bool(_cfg(prefs, "smtpHost", "SMTP_HOST") and (getattr(prefs, "notify_email", "") or "").strip())
+        if key == CH_TWILIO:
+            return bool(_cfg(prefs, "twilioAccountSid", "TWILIO_ACCOUNT_SID")
+                        and _cfg(prefs, "twilioAuthToken", "TWILIO_AUTH_TOKEN")
+                        and _cfg(prefs, "twilioWhatsappFrom", "TWILIO_WHATSAPP_FROM")
+                        and (getattr(prefs, "notify_whatsapp", "") or "").strip())
+        if key == CH_META:
+            return bool(_cfg(prefs, "whatsappToken", "WHATSAPP_TOKEN")
+                        and _cfg(prefs, "whatsappPhoneId", "WHATSAPP_PHONE_ID")
+                        and (getattr(prefs, "notify_whatsapp", "") or "").strip())
+        if key == CH_SLACK:
+            return bool(_cfg(prefs, "slackWebhook", "SLACK_WEBHOOK"))
+        return False
 
     # ---- dispatch ---------------------------------------------------------------
     async def _dispatch(self, mission: Mission, event: str, *, subject: str, body: str,
@@ -163,28 +244,7 @@ class Notifier:
 
     # ---- channels (each skips silently when unconfigured) -----------------------
     async def _send_email(self, prefs, subject: str, body: str) -> None:
-        host = _cfg(prefs, "smtpHost", "SMTP_HOST")
-        to_addr = (getattr(prefs, "notify_email", "") or "").strip()
-        if not host or not to_addr:
-            return
-        user = _cfg(prefs, "smtpUser", "SMTP_USER")
-        from_addr = _cfg(prefs, "smtpFrom", "SMTP_FROM") or user or "shipwright@localhost"
-        port = int(_cfg(prefs, "smtpPort", "SMTP_PORT", "587") or "587")
-        password = _cfg(prefs, "smtpPassword", "SMTP_PASSWORD")
-        use_tls = _cfg(prefs, "smtpTls", "SMTP_TLS", "1").lower() not in {"0", "false", "no", "off"}
-
-        def _send() -> None:
-            msg = EmailMessage()
-            msg["Subject"], msg["From"], msg["To"] = subject, from_addr, to_addr
-            msg.set_content(body)
-            with smtplib.SMTP(host, port, timeout=_TIMEOUT) as smtp:
-                if use_tls:
-                    smtp.starttls(context=ssl.create_default_context())
-                if user:
-                    smtp.login(user, password)
-                smtp.send_message(msg)
-
-        await asyncio.to_thread(_send)  # smtplib is blocking
+        await send_email(prefs, getattr(prefs, "notify_email", "") or "", subject, body)
 
     async def _send_twilio(self, prefs, subject: str, body: str) -> None:
         sid = _cfg(prefs, "twilioAccountSid", "TWILIO_ACCOUNT_SID")
