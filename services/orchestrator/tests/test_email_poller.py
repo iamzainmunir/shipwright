@@ -4,7 +4,14 @@ from __future__ import annotations
 from email.message import EmailMessage
 
 from app.email_poller import _decode, _header, _plain_text
-from app.notifier import clean_header, clean_secret
+from app.notifier import clean_header, clean_secret, normalize_url
+
+
+def test_normalize_url_prepends_scheme():
+    assert normalize_url("hooks.slack.com/services/T/B/x") == "https://hooks.slack.com/services/T/B/x"
+    assert normalize_url("https://hooks.slack.com/x") == "https://hooks.slack.com/x"
+    assert normalize_url(" http://x.test ") == "http://x.test"
+    assert normalize_url("") == ""
 
 
 def test_clean_secret_strips_gmail_app_password_spaces():

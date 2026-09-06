@@ -85,6 +85,15 @@ def clean_secret(value: str) -> str:
     return "".join((value or "").split())
 
 
+def normalize_url(url: str) -> str:
+    """Make a pasted webhook URL forgiving: strip stray whitespace and prepend ``https://`` when the
+    scheme was left off (a common paste mistake), so ``hooks.slack.com/…`` still works."""
+    url = clean_header(url)
+    if url and not url.lower().startswith(("http://", "https://")):
+        url = "https://" + url
+    return url
+
+
 async def send_email(prefs, to_addr: str, subject: str, body: str) -> None:
     """Send one email via the workspace's SMTP settings to an arbitrary recipient. Shared by the
     outbound alerts (recipient = ``notify_email``) and the two-way IMAP poller (recipient = the
@@ -282,7 +291,7 @@ class Notifier:
             resp.raise_for_status()
 
     async def _send_slack(self, prefs, subject: str, body: str, blocks: list | None = None) -> None:
-        webhook = _cfg(prefs, "slackWebhook", "SLACK_WEBHOOK")
+        webhook = normalize_url(_cfg(prefs, "slackWebhook", "SLACK_WEBHOOK"))
         if not webhook:
             return
         payload = {"blocks": blocks} if blocks else {"text": f"*{subject}*\n{body}"}
