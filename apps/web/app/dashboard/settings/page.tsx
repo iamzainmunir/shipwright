@@ -3,6 +3,7 @@
 import { Badge, type BadgeTone, Button, Icon, type IconName, cx } from "@foundry/ui";
 import { type CSSProperties, type ReactNode, useEffect, useId, useState } from "react";
 import { isApiError } from "@/lib/api";
+import { BrandIcon } from "@/components/brand-icon";
 import { useToast } from "@/components/toast";
 import {
   AUTONOMY_LEVELS,
@@ -35,33 +36,59 @@ const NOTIFY_CHANNELS: { key: string; label: string }[] = [
   { key: "slack", label: "Slack" },
 ];
 
-/** Per-channel setup guidance: which .env vars to set, a one-line how-to, and a docs link. */
-const CHANNEL_HELP: Record<string, { env: string; note: string; href: string; label: string }> = {
+/** Per-channel setup guidance: a one-line how-to and a docs link (credentials are entered below). */
+const CHANNEL_HELP: Record<string, { note: string; href: string; label: string }> = {
   email: {
-    env: "SHIPWRIGHT_SMTP_HOST · _SMTP_PORT · _SMTP_USER · _SMTP_PASSWORD · _SMTP_FROM",
-    note: "Set your SMTP server in .env (a Gmail App Password, Amazon SES, Postmark, …). Mail is sent to the Email address below.",
+    note: "Enter your SMTP details below (a Gmail App Password, Amazon SES, Postmark, …). Mail is sent to the recipient email.",
     href: "https://support.google.com/mail/answer/185833",
     label: "Gmail App Password guide",
   },
   whatsapp_twilio: {
-    env: "SHIPWRIGHT_TWILIO_ACCOUNT_SID · _TWILIO_AUTH_TOKEN · _TWILIO_WHATSAPP_FROM",
-    note: "Create a Twilio account, enable the WhatsApp sandbox (or a real sender), and set the three vars in .env. Sent to the WhatsApp number below.",
+    note: "Create a Twilio account, enable the WhatsApp sandbox (or a real sender), and paste the credentials below. Sent to the recipient number.",
     href: "https://www.twilio.com/docs/whatsapp/quickstart",
     label: "Twilio WhatsApp quickstart",
   },
   whatsapp_meta: {
-    env: "SHIPWRIGHT_WHATSAPP_TOKEN · _WHATSAPP_PHONE_ID",
-    note: "Create a Meta app with WhatsApp, then copy the access token + phone-number ID into .env. Sent to the WhatsApp number below.",
+    note: "Create a Meta app with WhatsApp, then paste the access token + phone-number ID below. Sent to the recipient number.",
     href: "https://developers.facebook.com/docs/whatsapp/cloud-api/get-started",
     label: "Meta Cloud API get-started",
   },
   slack: {
-    env: "SHIPWRIGHT_SLACK_WEBHOOK",
-    note: "Create a Slack Incoming Webhook — you choose the target channel when you create it, so no channel name is needed here — and paste its URL into .env.",
+    note: "Create a Slack Incoming Webhook — you choose the target channel when you create it, so no channel name is needed here — and paste its URL below.",
     href: "https://api.slack.com/messaging/webhooks",
     label: "Slack Incoming Webhooks",
   },
 };
+
+/** The credential/config fields each channel needs (secrets are write-only). */
+const CHANNEL_FIELDS: Record<string, { key: string; label: string; secret?: boolean; placeholder?: string }[]> = {
+  email: [
+    { key: "smtpHost", label: "SMTP host", placeholder: "smtp.gmail.com" },
+    { key: "smtpPort", label: "Port", placeholder: "587" },
+    { key: "smtpUser", label: "Username", placeholder: "you@gmail.com" },
+    { key: "smtpPassword", label: "Password", secret: true },
+    { key: "smtpFrom", label: "From (optional)", placeholder: "Shipwright <you@gmail.com>" },
+  ],
+  whatsapp_twilio: [
+    { key: "twilioAccountSid", label: "Account SID", placeholder: "AC…" },
+    { key: "twilioAuthToken", label: "Auth token", secret: true },
+    { key: "twilioWhatsappFrom", label: "WhatsApp sender", placeholder: "whatsapp:+14155238886" },
+  ],
+  whatsapp_meta: [
+    { key: "whatsappToken", label: "Access token", secret: true },
+    { key: "whatsappPhoneId", label: "Phone number ID", placeholder: "1234567890" },
+  ],
+  slack: [
+    { key: "slackWebhook", label: "Incoming webhook URL", secret: true, placeholder: "https://hooks.slack.com/services/…" },
+  ],
+};
+
+/** A small icon per channel — the real Slack logo, emoji for the rest. */
+function channelIcon(key: string): ReactNode {
+  if (key === "slack") return <BrandIcon kind="slack" name="Slack" size={15} />;
+  const emoji: Record<string, string> = { email: "✉️", whatsapp_twilio: "💬", whatsapp_meta: "💬" };
+  return <span aria-hidden style={{ fontSize: 14 }}>{emoji[key] ?? "🔔"}</span>;
+}
 const NOTIFY_EVENTS: { key: string; label: string }[] = [
   { key: "blocker", label: "Blocker raised" },
   { key: "approval", label: "Ready for approval" },
@@ -474,6 +501,7 @@ export default function SettingsPage() {
       notifyEvents: draft.notifyEvents,
       notifyEmail: draft.notifyEmail,
       notifyWhatsapp: draft.notifyWhatsapp,
+      notifyConfig: draft.notifyConfig,
     };
     try {
       const updated = await updateSettings(body);
@@ -836,6 +864,7 @@ export default function SettingsPage() {
           />
           {draft.notifyEnabled && (
             <>
+              {/* Channels — with an icon each */}
               <div className="field" style={{ margin: "14px 0 6px" }}>
                 <label>Channels</label>
                 <div className="row gap-8" style={{ flexWrap: "wrap" }}>
@@ -847,62 +876,16 @@ export default function SettingsPage() {
                         type="button"
                         aria-pressed={on}
                         onClick={() => edit({ notifyChannels: { ...draft.notifyChannels, [c.key]: !on } })}
-                        style={chipStyle(on)}
+                        style={{ ...chipStyle(on), display: "inline-flex", alignItems: "center", gap: 6 }}
                       >
-                        {c.label}
+                        {channelIcon(c.key)} {c.label}
                       </button>
                     );
                   })}
                 </div>
               </div>
 
-              {NOTIFY_CHANNELS.some((c) => draft.notifyChannels?.[c.key]) && (
-                <div style={{ margin: "4px 0 12px", display: "grid", gap: 8 }}>
-                  {NOTIFY_CHANNELS.filter((c) => draft.notifyChannels?.[c.key]).map((c) => {
-                    const h = CHANNEL_HELP[c.key];
-                    if (!h) return null;
-                    return (
-                      <div
-                        key={c.key}
-                        style={{
-                          padding: "10px 12px",
-                          borderRadius: 10,
-                          border: "1px solid var(--line)",
-                          background: "var(--surface)",
-                        }}
-                      >
-                        <div
-                          className="row gap-8"
-                          style={{ alignItems: "center", justifyContent: "space-between" }}
-                        >
-                          <span style={{ fontWeight: 700, fontSize: 13 }}>How to set up · {c.label}</span>
-                          <a
-                            href={h.href}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="link"
-                            style={{ fontSize: 12.5, whiteSpace: "nowrap" }}
-                          >
-                            {h.label} <Icon name="external" size={12} />
-                          </a>
-                        </div>
-                        <p className="hint" style={{ margin: "4px 0 6px" }}>{h.note}</p>
-                        <code
-                          style={{
-                            fontSize: 11.5,
-                            fontFamily: "var(--font-mono, monospace)",
-                            color: "var(--brand)",
-                            wordBreak: "break-all",
-                          }}
-                        >
-                          {h.env}
-                        </code>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-
+              {/* Events */}
               <div className="field" style={{ margin: "10px 0 6px" }}>
                 <label>Notify me on</label>
                 <div className="row gap-8" style={{ flexWrap: "wrap" }}>
@@ -923,31 +906,96 @@ export default function SettingsPage() {
                 </div>
               </div>
 
-              <div className="field" style={{ marginBottom: 8 }}>
-                <label htmlFor="notify-email">Email address</label>
-                <input
-                  id="notify-email"
-                  type="email"
-                  placeholder="you@example.com"
-                  value={draft.notifyEmail}
-                  onChange={(e) => edit({ notifyEmail: e.target.value })}
-                  style={notifyInput}
-                />
-                <span className="hint">Used by the Email channel (needs SMTP configured server-side).</span>
-              </div>
-
-              <div className="field" style={{ marginBottom: 0 }}>
-                <label htmlFor="notify-whatsapp">WhatsApp number</label>
-                <input
-                  id="notify-whatsapp"
-                  type="tel"
-                  placeholder="+15551234567"
-                  value={draft.notifyWhatsapp}
-                  onChange={(e) => edit({ notifyWhatsapp: e.target.value })}
-                  style={notifyInput}
-                />
-                <span className="hint">E.164 format. Used by both WhatsApp channels.</span>
-              </div>
+              {/* Per-channel credential forms (stored in the DB; secrets are write-only) */}
+              {NOTIFY_CHANNELS.filter((c) => draft.notifyChannels?.[c.key]).map((c) => {
+                const h = CHANNEL_HELP[c.key];
+                const fields = CHANNEL_FIELDS[c.key] ?? [];
+                const cfg = (draft.notifyConfig ?? {}) as Record<string, unknown>;
+                return (
+                  <div
+                    key={c.key}
+                    style={{
+                      margin: "8px 0 4px",
+                      padding: "12px 14px",
+                      borderRadius: 12,
+                      border: "1px solid var(--line)",
+                      background: "var(--surface)",
+                    }}
+                  >
+                    <div
+                      className="row gap-8"
+                      style={{ alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}
+                    >
+                      <span className="row gap-8" style={{ alignItems: "center", fontWeight: 700 }}>
+                        {channelIcon(c.key)} {c.label}
+                      </span>
+                      {h && (
+                        <a
+                          href={h.href}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="link"
+                          style={{ fontSize: 12.5, whiteSpace: "nowrap" }}
+                        >
+                          {h.label} <Icon name="external" size={12} />
+                        </a>
+                      )}
+                    </div>
+                    {h && <p className="hint" style={{ margin: "0 0 10px" }}>{h.note}</p>}
+                    <div
+                      style={{
+                        display: "grid",
+                        gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+                        gap: 10,
+                      }}
+                    >
+                      {fields.map((f) => {
+                        const saved = Boolean(cfg[`${f.key}Set`]);
+                        return (
+                          <div className="field" key={f.key} style={{ marginBottom: 0 }}>
+                            <label htmlFor={`nc-${f.key}`}>{f.label}</label>
+                            <input
+                              id={`nc-${f.key}`}
+                              type={f.secret ? "password" : "text"}
+                              autoComplete="off"
+                              value={String(cfg[f.key] ?? "")}
+                              placeholder={f.secret && saved ? "•••••••• saved" : f.placeholder ?? ""}
+                              onChange={(e) => edit({ notifyConfig: { ...cfg, [f.key]: e.target.value } })}
+                              style={notifyInput}
+                            />
+                          </div>
+                        );
+                      })}
+                      {c.key === "email" && (
+                        <div className="field" style={{ marginBottom: 0 }}>
+                          <label htmlFor="notify-email">Recipient email</label>
+                          <input
+                            id="notify-email"
+                            type="email"
+                            placeholder="you@example.com"
+                            value={draft.notifyEmail}
+                            onChange={(e) => edit({ notifyEmail: e.target.value })}
+                            style={notifyInput}
+                          />
+                        </div>
+                      )}
+                      {(c.key === "whatsapp_twilio" || c.key === "whatsapp_meta") && (
+                        <div className="field" style={{ marginBottom: 0 }}>
+                          <label htmlFor={`notify-wa-${c.key}`}>Recipient WhatsApp (E.164)</label>
+                          <input
+                            id={`notify-wa-${c.key}`}
+                            type="tel"
+                            placeholder="+15551234567"
+                            value={draft.notifyWhatsapp}
+                            onChange={(e) => edit({ notifyWhatsapp: e.target.value })}
+                            style={notifyInput}
+                          />
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
             </>
           )}
         </div>

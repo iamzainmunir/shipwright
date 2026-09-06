@@ -514,8 +514,14 @@ class AutonomyPolicy(FoundryModel):
     notify_events: dict[str, bool] = Field(default_factory=dict)  # blocker · completed · failed · approval
     notify_email: str = ""  # recipient email address (for the email channel)
     notify_whatsapp: str = ""  # recipient WhatsApp number, E.164 e.g. +15551234567
+    # Provider credentials + settings, stored in the DB (configured in the UI, not .env). Secret
+    # keys (…Password/…Token/…Webhook) are write-only over the API — redacted on read, merged on write.
+    notify_config: dict = Field(default_factory=dict)
 
-    @field_validator("gates", "guardrails", "features", "notify_channels", "notify_events", mode="before")
+    @field_validator(
+        "gates", "guardrails", "features", "notify_channels", "notify_events", "notify_config",
+        mode="before",
+    )
     @classmethod
     def _coerce_none_dict(cls, v: object) -> object:
         """A JSON column can be NULL for rows created before the field existed — read NULL as ``{}``."""

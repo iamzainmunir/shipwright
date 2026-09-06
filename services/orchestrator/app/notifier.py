@@ -2,20 +2,15 @@
 
 Design mirrors the rest of the platform: **offline by default, real backend is a drop-in**, and
 **failure-isolated** (the Observer rule — a notification never fails a run). Which channels and
-events fire, and the recipient email / WhatsApp number, are per-workspace preferences set in
-Settings; the *provider credentials* come from the environment so secrets never touch the DB.
-Any channel whose credentials or recipient are missing is silently skipped.
+events fire, the recipient email / WhatsApp number, AND the provider credentials are per-workspace
+settings **stored in the DB and configured in the UI** (``AutonomyPolicy.notify_config``); secrets
+are redacted on read + merged on write by the API. Any channel whose credentials or recipient are
+missing is silently skipped.
 
-Environment (all optional; a channel with no creds is a no-op):
-
-  Email (SMTP):   SHIPWRIGHT_SMTP_HOST, _SMTP_PORT (default 587), _SMTP_USER, _SMTP_PASSWORD,
-                  _SMTP_FROM (default _SMTP_USER), _SMTP_TLS ("1" default; "0" for plain/local)
-  WhatsApp Twilio: SHIPWRIGHT_TWILIO_ACCOUNT_SID, _TWILIO_AUTH_TOKEN,
-                   _TWILIO_WHATSAPP_FROM (e.g. "whatsapp:+14155238886")
-  WhatsApp Meta:   SHIPWRIGHT_WHATSAPP_TOKEN, _WHATSAPP_PHONE_ID
-  Slack/webhook:   SHIPWRIGHT_SLACK_WEBHOOK (an incoming-webhook URL)
-
-Legacy FOUNDRY_* names are still honoured for every variable above.
+``notify_config`` keys (camelCase): ``smtpHost/smtpPort/smtpUser/smtpPassword/smtpFrom/smtpTls``,
+``twilioAccountSid/twilioAuthToken/twilioWhatsappFrom``, ``whatsappToken/whatsappPhoneId``,
+``slackWebhook``. Each falls back to the matching ``SHIPWRIGHT_/FOUNDRY_*`` env var (for
+ops/deploy) when the DB value is absent — see :func:`_cfg`.
 """
 from __future__ import annotations
 
@@ -50,6 +45,13 @@ _TIMEOUT = 10.0
 def _env(name: str, default: str = "") -> str:
     """Read ``SHIPWRIGHT_<name>``, falling back to the legacy ``FOUNDRY_<name>``, then default."""
     return os.getenv(f"SHIPWRIGHT_{name}") or os.getenv(f"FOUNDRY_{name}") or default
+
+
+def _cfg(prefs, key: str, env_name: str, default: str = "") -> str:
+    """A notification setting: prefer the DB-stored ``notify_config[key]`` (configured in the UI),
+    fall back to the legacy ``SHIPWRIGHT_/FOUNDRY_<env_name>`` env var, then the default."""
+    value = str((getattr(prefs, "notify_config", None) or {}).get(key) or "").strip()
+    return value or _env(env_name, default)
 
 
 class Notifier:
@@ -104,7 +106,7 @@ class Notifier:
             CH_EMAIL: lambda: self._send_email(prefs, subject, body),
             CH_TWILIO: lambda: self._send_twilio(prefs, subject, body),
             CH_META: lambda: self._send_meta(prefs, subject, body),
-            CH_SLACK: lambda: self._send_slack(subject, body),
+            CH_SLACK: lambda: self._send_slack(prefs, subject, body),
         }
         for key, make in senders.items():
             if not channels.get(key, False):
@@ -130,15 +132,15 @@ class Notifier:
 
     # ---- channels (each skips silently when unconfigured) -----------------------
     async def _send_email(self, prefs, subject: str, body: str) -> None:
-        host = _env("SMTP_HOST").strip()
+        host = _cfg(prefs, "smtpHost", "SMTP_HOST")
         to_addr = (getattr(prefs, "notify_email", "") or "").strip()
         if not host or not to_addr:
             return
-        user = _env("SMTP_USER").strip()
-        from_addr = _env("SMTP_FROM").strip() or user or "shipwright@localhost"
-        port = int(_env("SMTP_PORT", "587") or "587")
-        password = _env("SMTP_PASSWORD")
-        use_tls = _env("SMTP_TLS", "1").strip().lower() not in {"0", "false", "no", "off"}
+        user = _cfg(prefs, "smtpUser", "SMTP_USER")
+        from_addr = _cfg(prefs, "smtpFrom", "SMTP_FROM") or user or "shipwright@localhost"
+        port = int(_cfg(prefs, "smtpPort", "SMTP_PORT", "587") or "587")
+        password = _cfg(prefs, "smtpPassword", "SMTP_PASSWORD")
+        use_tls = _cfg(prefs, "smtpTls", "SMTP_TLS", "1").lower() not in {"0", "false", "no", "off"}
 
         def _send() -> None:
             msg = EmailMessage()
@@ -154,9 +156,9 @@ class Notifier:
         await asyncio.to_thread(_send)  # smtplib is blocking
 
     async def _send_twilio(self, prefs, subject: str, body: str) -> None:
-        sid = _env("TWILIO_ACCOUNT_SID").strip()
-        token = _env("TWILIO_AUTH_TOKEN").strip()
-        from_wa = _env("TWILIO_WHATSAPP_FROM").strip()
+        sid = _cfg(prefs, "twilioAccountSid", "TWILIO_ACCOUNT_SID")
+        token = _cfg(prefs, "twilioAuthToken", "TWILIO_AUTH_TOKEN")
+        from_wa = _cfg(prefs, "twilioWhatsappFrom", "TWILIO_WHATSAPP_FROM")
         to = (getattr(prefs, "notify_whatsapp", "") or "").strip()
         if not (sid and token and from_wa and to):
             return
@@ -170,8 +172,8 @@ class Notifier:
             resp.raise_for_status()
 
     async def _send_meta(self, prefs, subject: str, body: str) -> None:
-        token = _env("WHATSAPP_TOKEN").strip()
-        phone_id = _env("WHATSAPP_PHONE_ID").strip()
+        token = _cfg(prefs, "whatsappToken", "WHATSAPP_TOKEN")
+        phone_id = _cfg(prefs, "whatsappPhoneId", "WHATSAPP_PHONE_ID")
         to = (getattr(prefs, "notify_whatsapp", "") or "").strip().removeprefix("whatsapp:").lstrip("+")
         if not (token and phone_id and to):
             return
@@ -188,8 +190,8 @@ class Notifier:
             )
             resp.raise_for_status()
 
-    async def _send_slack(self, subject: str, body: str) -> None:
-        webhook = _env("SLACK_WEBHOOK").strip()
+    async def _send_slack(self, prefs, subject: str, body: str) -> None:
+        webhook = _cfg(prefs, "slackWebhook", "SLACK_WEBHOOK")
         if not webhook:
             return
         async with httpx.AsyncClient(timeout=_TIMEOUT) as client:

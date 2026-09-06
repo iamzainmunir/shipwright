@@ -607,6 +607,9 @@ export interface AutonomyPolicy {
   notifyEvents: Record<string, boolean>; // blocker · completed · failed · approval
   notifyEmail: string;
   notifyWhatsapp: string;
+  /** Provider credentials + settings (stored in the DB). Secrets are redacted on read and echoed
+   *  back only as `<key>Set` booleans; send a new value to change one, blank to leave it unchanged. */
+  notifyConfig: Record<string, unknown>;
 }
 
 /** Fields the PATCH /settings endpoint accepts; each is optional (partial update). */
@@ -626,6 +629,7 @@ export type SettingsPatch = Partial<
     | "notifyEvents"
     | "notifyEmail"
     | "notifyWhatsapp"
+    | "notifyConfig"
   >
 >;
 

@@ -334,6 +334,7 @@ class AutonomyPolicyRow(Base):
     notify_events: Mapped[dict] = mapped_column(JSON, default=dict)
     notify_email: Mapped[str] = mapped_column(String(320), default="")
     notify_whatsapp: Mapped[str] = mapped_column(String(32), default="")
+    notify_config: Mapped[dict] = mapped_column(JSON, default=dict)
 
 
 class ProjectRow(Base):

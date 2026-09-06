@@ -1114,18 +1114,44 @@ class SettingsPatch(_Body):
     notify_events: dict[str, bool] | None = None
     notify_email: str | None = None
     notify_whatsapp: str | None = None
+    notify_config: dict | None = None
+
+
+# Notification provider secrets are write-only over the API — redacted on read, merged on write — so
+# the UI never sees a stored password/token/webhook but can tell (via a ``<key>Set`` bool) one is saved.
+_NOTIFY_SECRET_KEYS = {"smtpPassword", "twilioAuthToken", "whatsappToken", "slackWebhook"}
+
+
+def _public_settings(policy) -> dict:
+    """Serialize settings with ``notify_config`` secrets redacted (each replaced by a ``<key>Set`` bool)."""
+    d = policy.model_dump(by_alias=True)
+    cfg = dict(d.get("notifyConfig") or {})
+    for k in _NOTIFY_SECRET_KEYS:
+        cfg[f"{k}Set"] = bool(str(cfg.get(k, "")).strip())
+        cfg.pop(k, None)
+    d["notifyConfig"] = cfg
+    return d
 
 
 @router.get("/settings", description="x-required-scope: settings:read")
 async def get_settings() -> dict:
-    return (await get_store().get_settings()).model_dump(by_alias=True)
+    return _public_settings(await get_store().get_settings())
 
 
 @router.patch("/settings", description="x-required-scope: settings:write")
 async def update_settings(body: SettingsPatch) -> dict:
     changes = body.model_dump(exclude_unset=True, by_alias=False)
+    if "notify_config" in changes:
+        incoming = {k: v for k, v in (changes.get("notify_config") or {}).items()
+                    if not k.endswith("Set")}  # drop the read-only markers the UI echoes back
+        # a blank secret means "unchanged" — merge over the stored config so it isn't wiped
+        incoming = {k: v for k, v in incoming.items()
+                    if not (k in _NOTIFY_SECRET_KEYS and not str(v).strip())}
+        merged = dict((await get_store().get_settings()).notify_config or {})
+        merged.update(incoming)
+        changes["notify_config"] = merged
     updated = await get_store().update_settings(**changes)
-    return updated.model_dump(by_alias=True)
+    return _public_settings(updated)
 
 
 # ---- workspace metrics (Command Center) -----------------------------------------
