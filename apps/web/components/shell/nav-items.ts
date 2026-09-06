@@ -24,6 +24,7 @@ export const NAV: NavGroup[] = [
     items: [
       { label: "Command Center", href: "/dashboard", icon: "grid" },
       { label: "Missions", href: "/dashboard/missions", icon: "kanban", countKey: "missions" },
+      { label: "Projects", href: "/dashboard/projects", icon: "branch" },
       { label: "Tickets", href: "/dashboard/tickets", icon: "ticket" },
       { label: "Team", href: "/dashboard/team", icon: "users", countKey: "team" },
     ],

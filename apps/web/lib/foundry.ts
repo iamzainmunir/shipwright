@@ -151,6 +151,26 @@ export const listMissions = () => api.get<Mission[]>(`${V1}/missions`);
 export const getMission = (key: string) => api.get<Mission>(`${V1}/missions/${key}`);
 export const createMission = (body: CreateMissionInput) => api.post<Mission>(`${V1}/missions`, body);
 
+/** A registered/built codebase (local git repo) in the project registry. */
+export interface Project {
+  id: string;
+  workspaceId: string;
+  name: string;
+  slug: string;
+  path: string;
+  source: "built" | "registered";
+  createdAt?: string | null;
+  lastActivityAt?: string | null;
+}
+
+export const listProjects = () => api.get<Project[]>(`${V1}/projects`);
+export const registerProject = (body: { name: string; path: string }) =>
+  api.post<Project>(`${V1}/projects`, body);
+export const deleteProject = (id: string) => api.del<void>(`${V1}/projects/${id}`);
+/** Start one coordinated change across the selected projects; returns the created mission. */
+export const startProjectChange = (body: { projectIds: string[]; title: string; request: string }) =>
+  api.post<Mission>(`${V1}/projects/change`, body);
+
 /**
  * Edit a mission between builds — pass only the fields that changed (see `UpdateMissionInput`).
  * Returns the updated Mission (with `lastRunStatus`). Throws an `ApiError` with the server's 422
