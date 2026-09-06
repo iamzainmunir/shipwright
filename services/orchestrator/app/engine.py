@@ -332,6 +332,9 @@ class RunEngine:
         self._rework_reason: dict[str, str] = {}
         # Repo/branch the user supplies at the merge gate, so the push targets their real repo.
         self._merge_meta: dict[str, dict[str, str]] = {}  # mission_id → {repo, branch}
+        # Multi-project coordinated change (Approach A): mission_id → per-repo build detail
+        # [{name, path, branch, files, diff, healthy, ...}]. Empty for single-project missions.
+        self._multi_repo: dict[str, list] = {}
         # Built-in ticket board consumer (plan 05) — derives Epics/Stories/Bugs from the lifecycle.
         # Failure-isolated: a ticket bug never fails a run (Observer rule). The optional Jira mirror
         # hooks in as the consumer's sink, enqueuing outbox rows only (Rule 0: Jira never blocks a run).
@@ -347,6 +350,79 @@ class RunEngine:
         falling back to the global default (``SHIPWRIGHT_PROJECTS_ROOT`` → ``~/ShipwrightProjects``)."""
         configured = ((await self.store.get_settings()).projects_dir or "").strip()
         return configured or self.projects_root
+
+    async def _project_targets(self, mission: Mission) -> list[tuple[str, str]]:
+        """A multi-target change's projects as ``(name, path)`` — empty for a single-project mission.
+
+        Silently drops ids that no longer resolve; the build then treats a repo that can't be
+        opened as an unhealthy slice (never crashes the run)."""
+        ids = list(getattr(mission, "project_ids", []) or [])
+        if not ids:
+            return []
+        out: list[tuple[str, str]] = []
+        for pid in ids:
+            project = await self.store.get_project(pid, mission.workspace_id)
+            if project is not None:
+                out.append((project.name, project.path))
+        return out
+
+    async def _build_multi_repo(self, mission: Mission, provider, targets, on_tool, on_turn):
+        """Coordinated change across several repos: each is edited on its own ``fix/`` branch with the
+        WHOLE working set as shared context, so a change stays consistent across repos (e.g. add an
+        API in the service and wire it into the gateway). Returns an aggregated ``(BuildResult, sb)``
+        and stashes per-repo detail in ``self._multi_repo[mission.id]``."""
+        from . import devloop
+        from .repomap import build_context
+
+        context = build_context(targets)
+        original = (mission.requirements or mission.summary or mission.title or "").strip()
+        repos: list[dict] = []
+        all_files: list[str] = []
+        diffs: list[str] = []
+        first_sb = None
+        branch = ""
+        steps = files_written = tokens_in = tokens_out = cost_cents = 0
+        tests_all = True
+        for name, path in targets:
+            brief = (
+                f"You are making ONE coordinated change across {len(targets)} repositories. Here is the "
+                f"full working set so you keep them consistent:\n\n{context}\n\n"
+                f"Now edit ONLY this repository — {name} ({path}) — for its part of the change:\n\n"
+                f"{original}\n\nIf this repo needs no change for this request, make no edits."
+            )
+            per = mission.model_copy(update={"project_path": path, "requirements": brief})
+            try:
+                result, sb, _ = await devloop.change_in_repo(
+                    per, provider, on_event=on_tool, on_turn=on_turn,
+                )
+            except Exception as exc:  # noqa: BLE001 — one repo failing is recorded; others continue
+                repos.append({"name": name, "path": path, "branch": "", "files": [],
+                              "tests_passed": False, "diff": "", "healthy": False, "error": str(exc)})
+                continue
+            first_sb = first_sb or sb
+            branch = branch or result.branch
+            healthy, _why = _assess_build(result)
+            all_files += [f"{name}:{f}" for f in result.files]
+            diffs.append(f"# {name} ({path}) — branch {result.branch}\n{result.diff}")
+            steps += result.steps
+            files_written += result.files_written
+            tokens_in += result.tokens_in
+            tokens_out += result.tokens_out
+            cost_cents += result.cost_cents
+            tests_all = tests_all and result.tests_passed
+            repos.append({"name": name, "path": path, "branch": result.branch,
+                          "files": list(result.files), "tests_passed": result.tests_passed,
+                          "diff": result.diff, "healthy": healthy, "summary": result.summary})
+        self._multi_repo[mission.id] = repos
+        edited = [r["name"] for r in repos if r["files"]]
+        agg = devloop.BuildResult(
+            branch=branch or f"fix/{mission.key}-multi", diff="\n\n".join(diffs), files=all_files,
+            tests_passed=tests_all, steps=steps, files_written=files_written,
+            tokens_in=tokens_in, tokens_out=tokens_out, cost_cents=cost_cents,
+            summary=(f"Coordinated change across {len(repos)} repos"
+                     + (f"; edited {', '.join(edited)}" if edited else "; no edits were needed")),
+        )
+        return agg, first_sb
 
     async def _github_token(self) -> str:
         """The GitHub push token. Prefers the token the user connected on the Integrations page
@@ -2064,6 +2140,11 @@ class RunEngine:
                 return ""
 
         async def _one_build(provider):
+            # Multi-project coordinated change (Approach A): edit each selected repo in turn, with the
+            # whole working set as shared context. Single-project missions skip this entirely.
+            targets = await self._project_targets(mission)
+            if targets:
+                return await self._build_multi_repo(mission, provider, targets, on_tool, on_turn)
             if is_app:
                 if do_parallel:
                     # Fork-join: each role-matched agent builds a disjoint part (pre-decomposed).
@@ -2160,6 +2241,10 @@ class RunEngine:
             # net writes in THIS build (0 on a rework ⇒ no progress → the stuck-loop guard fires)
             "files_written": int(getattr(result, "files_written", 0) or 0),
         }
+        # Coordinated multi-repo change: attach per-repo detail (branch/files/diff/healthy) so review,
+        # QA, and the UI judge the WHOLE change set, not just one repo.
+        if mission_id in self._multi_repo:
+            self._build_facts[mission_id]["repos"] = self._multi_repo[mission_id]
         # (The build step's parallel role breakdown was stamped up-front, when the plan was decided,
         # so it shows during the build and survives a mid-build failure — see the do_parallel block.)
         run = await self.store.get_run(run_id) or run
