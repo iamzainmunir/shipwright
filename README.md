@@ -8,6 +8,8 @@
 
 > New here? Read **[docs/HOW-IT-WORKS.md](docs/HOW-IT-WORKS.md)** for the full picture — the pipeline, the roles, the models, and the autonomy model, with the *what / how / when* of each.
 
+![How Shipwright works](docs/images/how-it-works.svg)
+
 ![Command center dashboard](docs/images/dashboard.png)
 
 ---
@@ -18,6 +20,7 @@
 |---|---|
 | **Live Build** — the pipeline running in real time, with one-click *Run app* on a shipped build.<br>![Live Build](docs/images/live-build.png) | **Ticket board** — a Jira-like board the team drives itself, with the QA evidence behind every verdict.<br>![Ticket board](docs/images/tickets.png) |
 | **Models** — bind any provider per agent (Anthropic, OpenAI-compatible, Ollama, or Claude Code CLI), with failover and live metering.<br>![Models](docs/images/models.png) | **Team** — ten role-locked specialists laid out by the agentic SDLC, each with its own model binding.<br>![Team](docs/images/team.png) |
+| **Projects** — pick one or more codebases and prompt one change the team coordinates across them (add an API in a service, wire it into the gateway).<br>![Projects](docs/images/projects.png) | **Missions** — the kanban board of work, from backlog through building, review, QA, and shipped.<br>![Missions](docs/images/missions.png) |
 
 <sub>More in [`docs/images/`](docs/images). The landing page (`/`) has an auto-playing tour of these screens.</sub>
 
@@ -84,6 +87,7 @@ Set per mission: **manual → assisted → supervised → autonomous**. Autonomo
 
 ## Key features
 
+- **Multi-project coordinated change** — select several codebases (e.g. a service **and** its gateway) on the **Projects** screen and prompt one change; the team edits each affected repo on its own `fix/…` branch with the whole working set as shared context, so a new API in the service gets wired into the gateway in the same run — under one review → QA → ship gate.
 - **Parallel, coherent builds** — fork-join across role-matched engineers in isolated git worktrees, dependency-ordered, merged; targeted rework rebuilds only what failed.
 - **Real-app QA harness** — boots the app's own server (Node/Vite/static), drives headless Chromium, checks page load / render / console errors / acceptance-criteria text, captures screenshots — verdicts are grounded in what actually ran.
 - **Built-in ticket board** — a Jira-like board (To Do → In Progress → In Review → QA → Done) that live-updates as the team works, plus an optional one-way **Jira mirror**.
@@ -91,6 +95,8 @@ Set per mission: **manual → assisted → supervised → autonomous**. Autonomo
 - **Models & usage** — per-agent model binding, failover, real per-run token/cost metering, budgets and rate caps.
 - **Skills & memory** — reusable skills the team auto-invokes, and a workspace memory that keeps decisions consistent across missions.
 - **Integrations** — GitHub (push/PR at the ship gate, your consent required), Jira, and a real Chrome the QA agents can drive.
+- **Notifications** — opt-in **email, WhatsApp, or Slack** alerts when a mission is blocked, needs approval, ships, or halts (configured per workspace in Settings; provider credentials stay in `.env`, never the DB).
+- **Configurable** — set the **mission-key prefix** (e.g. `SW-142`) and the **projects directory** per workspace in Settings; bring your own model-provider credentials.
 
 ---
 
