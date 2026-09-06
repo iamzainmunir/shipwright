@@ -33,8 +33,14 @@ def upgrade() -> None:
         "autonomy_policies",
         sa.Column("notify_enabled", sa.Boolean(), nullable=False, server_default=sa.false()),
     )
-    op.add_column("autonomy_policies", sa.Column("notify_channels", sa.JSON(), nullable=True))
-    op.add_column("autonomy_policies", sa.Column("notify_events", sa.JSON(), nullable=True))
+    op.add_column(
+        "autonomy_policies",
+        sa.Column("notify_channels", sa.JSON(), nullable=False, server_default=sa.text("'{}'")),
+    )
+    op.add_column(
+        "autonomy_policies",
+        sa.Column("notify_events", sa.JSON(), nullable=False, server_default=sa.text("'{}'")),
+    )
     op.add_column(
         "autonomy_policies",
         sa.Column("notify_email", sa.String(length=320), nullable=False, server_default=""),

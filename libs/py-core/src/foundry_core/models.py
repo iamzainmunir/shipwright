@@ -16,7 +16,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 from pydantic.alias_generators import to_camel
 
 from foundry_core.enums import (
@@ -505,3 +505,9 @@ class AutonomyPolicy(FoundryModel):
     notify_events: dict[str, bool] = Field(default_factory=dict)  # blocker · completed · failed · approval
     notify_email: str = ""  # recipient email address (for the email channel)
     notify_whatsapp: str = ""  # recipient WhatsApp number, E.164 e.g. +15551234567
+
+    @field_validator("gates", "guardrails", "features", "notify_channels", "notify_events", mode="before")
+    @classmethod
+    def _coerce_none_dict(cls, v: object) -> object:
+        """A JSON column can be NULL for rows created before the field existed — read NULL as ``{}``."""
+        return v if v is not None else {}
