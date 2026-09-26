@@ -334,6 +334,11 @@ class RunEngine:
         # Ground-truth facts about the LATEST build, so QA/review/CTO judge the REAL deliverable and
         # the graph can gate on it (never ship a build that produced no real work). See _assess_build.
         self._build_facts: dict[str, dict] = {}  # mission_id → {files, tests_passed, steps, diff, healthy, why}
+        # A2 (fail-closed auto-ship): True ONLY when genuine ground-truth evidence was produced for this
+        # mission this session — a real build assessed by _assess_build, a deliverable reconstructed from
+        # disk, or runtime QA evidence (screenshots/smoke/API checks). Absence ⇒ unverified. An AUTONOMOUS
+        # merge auto-approves ONLY when verified; an unverified build never ships without a human.
+        self._verified: dict[str, bool] = {}  # mission_id → real evidence exists
         # The PM's task graph from the `plan` phase — the build REUSES it (never re-decomposes) so the
         # pre-created tickets and the build's subtasks line up. mission_id → list[devloop.Subtask].
         self._plans: dict[str, list] = {}
@@ -1036,6 +1041,11 @@ class RunEngine:
                 await self._finish_step(step.id, run_id, mission_id, phase)
                 return Outcome("ADVANCE")
             text = ""
+            if phase.key == "build.api":
+                # A2: every build attempt must RE-EARN verification. Clearing here means a rework/rebuild
+                # (or a reopened change) that produces no real evidence cannot auto-ship on a stale flag;
+                # _real_build / _ensure_build_facts / _run_qa_evidence set it True again from real work.
+                self._verified.pop(mission_id, None)
             if phase.key == "build.api" and self.sandbox_enabled:
                 await self._real_build(run_id, mission_id, phase, step.id)
             elif phase.purpose:
@@ -2310,6 +2320,10 @@ class RunEngine:
             # net writes in THIS build (0 on a rework ⇒ no progress → the stuck-loop guard fires)
             "files_written": int(getattr(result, "files_written", 0) or 0),
         }
+        # A real build was assessed against ground truth (files/steps/tests) → this mission is verified,
+        # so an autonomous merge may auto-approve. (An unhealthy build stays verified-but-unhealthy; the
+        # routing + gate handle that via _build_is_healthy.)
+        self._verified[mission_id] = True
         # Coordinated multi-repo change: attach per-repo detail (branch/files/diff/healthy) so review,
         # QA, and the UI judge the WHOLE change set, not just one repo.
         if mission_id in self._multi_repo:
@@ -2387,6 +2401,8 @@ class RunEngine:
             "summary": f"resumed: {len(files)} file(s) already on disk", "branch": "main",
             "healthy": healthy, "why": why, "subtasks": [], "files_written": len(files),
         }
+        # A real deliverable exists on disk and was assessed → verified (A2).
+        self._verified[mission_id] = True
         with contextlib.suppress(Exception):  # fold in real screenshots + smoke checks (serves the app)
             await self._run_qa_evidence(run_id, mission_id, mission)
 
@@ -2432,6 +2448,11 @@ class RunEngine:
             "checks": checks_out, "crit_total": crit_total, "crit_failed": crit_failed,
             "degradation": ev.degradation, "screenshots": shots,
         }
+        # Runtime evidence was gathered against the served app (screenshots/smoke/API checks) → verified,
+        # UNLESS the harness fully degraded and produced no real checks (crit_total==0 and no screenshots),
+        # which the design treats as *unverified*, not healthy (A2).
+        if crit_total > 0 or shots or (checks_out and ev.rung not in ("none", "degraded")):
+            self._verified[mission_id] = True
         run = await self.store.get_run(run_id)
         m = await self.store.get_mission(mission_id)
         if run and m:
@@ -2473,6 +2494,14 @@ class RunEngine:
         if not facts:
             return True, ""
         return bool(facts.get("healthy", True)), str(facts.get("why", ""))
+
+    def _is_verified(self, mission_id: str) -> bool:
+        """A2 — True only when GENUINE ground-truth evidence was produced this session (a real build
+        assessed by `_assess_build`, a deliverable reconstructed from disk, or runtime QA evidence).
+        The autonomous merge auto-approve gates on THIS, not on `_build_is_healthy` (which fails *open*
+        on absent facts) — so an autonomous run that never verified its work halts for a human instead
+        of shipping on an LLM verdict alone. Absence of evidence is never treated as verified."""
+        return bool(self._verified.get(mission_id))
 
     async def _open_pr_if_built(self, run_id: str, mission_id: str) -> bool:
         """Push the built work and open a PR. Returns True when the ship can complete (pushed, or
@@ -2579,6 +2608,7 @@ class RunEngine:
     async def _discard_build(self, mission_id: str) -> None:
         """Drop and destroy a throwaway sandbox that was PRESERVED across re-gates, when we give up
         on the push (reject / cap reached). A real on-disk project is never deleted."""
+        self._verified.pop(mission_id, None)  # A2: a discarded build is no longer verified
         entry = self._builds.pop(mission_id, None)
         if entry is None:
             return
@@ -2639,15 +2669,22 @@ class RunEngine:
         # routing already blocks such a build before ship, but if one ever reaches here, require the
         # human (don't auto-merge a stub). A healthy build in autonomous mode still auto-approves once.
         healthy, why = self._build_is_healthy(mission_id)
-        detail = ("Reviews passed. Awaiting your approval to merge." if healthy
+        # A2: an autonomous merge may auto-approve ONLY when the work was genuinely verified this session
+        # (real build/disk/runtime evidence). An unverified build — the "sandbox off ⇒ ships on the LLM
+        # verdict alone" hole — never auto-ships; it falls through to the human gate (halt), never forward.
+        verified = self._is_verified(mission_id)
+        if healthy and not verified:
+            why = why or "the build was never verified — no build/test/runtime evidence was produced"
+        can_auto = healthy and verified
+        detail = ("Reviews passed. Awaiting your approval to merge." if can_auto
                   else f"⚠ The build did not pass ground-truth checks ({why}). Approve only if you're sure.")
         regates = 0
         first = True
         while True:
-            if first and autonomous and healthy:
+            if first and autonomous and can_auto:
                 decision = ApprovalDecision.APPROVE.value  # autonomous auto-approves the FIRST merge
                 await self._emit(run, mission, AgentRoleKey.DEVOPS, "deploy",
-                                 "Auto-approved the merge gate (autonomous)")
+                                 "Auto-approved the merge gate (autonomous · verified)")
             else:
                 # Non-autonomous, OR autonomous whose push was rejected: the user must decide. (Even
                 # an autonomous mission can't force-push or switch branches on its own.)

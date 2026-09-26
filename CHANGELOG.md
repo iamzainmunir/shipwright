@@ -31,6 +31,15 @@ make it fire (**P3, part 1**) — all additive/low-risk. The verification-gate s
   one. A `tests_ran` signal now threads agent → `BuildResult` → build-facts, and `_assess_build` marks a
   build **unhealthy when a suite actually ran and failed** (a known-red build no longer ships); "no tests
   run" stays advisory, so an untested build is never false-failed.
+- **An unverified build could auto-ship (A2, CRITICAL).** With the sandbox off (the default), a build
+  produced no ground-truth facts, so the health check fell back to *healthy* and an **autonomous** mission
+  auto-approved the merge on the LLM's QA verdict alone. A per-mission **`verified`** signal is now set
+  **only** by genuine evidence (a real build assessed against files/steps/tests, a deliverable
+  reconstructed from disk, or runtime QA evidence — screenshots/smoke/API checks; a fully-degraded harness
+  counts as *unverified*, not healthy). The autonomous merge auto-approves **only when verified** —
+  otherwise it halts at the human gate and never ships on a verdict alone. Verification is re-earned every
+  build attempt (cleared at `build.api` and on discard), so a stale flag can't carry a new change through.
+  Holds for both the legacy and graph engines (both ship only through the same gate).
 - **CI `alembic check` gate.** Reconciled the ORM with the migration-built schema (unique
   constraints/indexes on `tickets`/`jira_issue_map`/`jira_outbox`/`custom_roles`/`projects`, and the
   `autonomy_policies` notify columns kept `NOT NULL` to match a fresh `alembic upgrade head`).
@@ -53,9 +62,7 @@ make it fire (**P3, part 1**) — all additive/low-risk. The verification-gate s
   (no arbitrary `skills[:2]` fallback) and surfaces each skill's **instructions/procedure**, not just a
   one-line description, so a recalled skill can actually change how the agent works. (audit A5/A6)
 
-### Planned (tracked, next PRs)
-- **A2 — fail-closed ground-truth gate** + **A15 — red test suite blocks ship** (change routing
-  semantics; need test-suite updates).
+### Planned (tracked, next)
 - **A14** skill/agent effectiveness metrics driving routing (needs a migration).
 - P1 Spec Contract + API QA · P7 learning UI · P4/P5 WhatsApp control plane · P6 Researcher agent.
 
