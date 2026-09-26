@@ -6,11 +6,10 @@ All notable changes to Shipwright are documented here. This project follows
 ## [Unreleased]
 
 An adversarial audit (2026-09-26, 23-agent verification workflow) surfaced 15 confirmed issues across
-verification-trust, runaway loops/cost, and the skills/memory learning loop. The full remediation +
-feature plan lives in [`docs/superpowers/plans/2026-09-26-shipwright-self-improvement-qa-whatsapp.md`](docs/superpowers/plans/2026-09-26-shipwright-self-improvement-qa-whatsapp.md).
-This branch lands **P0 (loop & cost guardrails)**, the **P2 compounding-learning loop**, and the
-retrieval fixes that make it fire (**P3, part 1**) — all additive/low-risk. The verification-gate
-semantics change (A2/A15) and the larger feature phases follow.
+verification-trust, runaway loops/cost, and the skills/memory learning loop. This work lands
+**P0 (loop & cost guardrails)**, the **P2 compounding-learning loop**, and the retrieval fixes that
+make it fire (**P3, part 1**) — all additive/low-risk. The verification-gate semantics change
+(A2/A15) and the larger feature phases follow.
 
 ### Added
 - **Per-run cost ceiling.** `SHIPWRIGHT_RUN_COST_BUDGET_CENTS` (0 = uncapped) is now enforced: a run
@@ -23,8 +22,6 @@ semantics change (A2/A15) and the larger feature phases follow.
   - auto-grown skills are **grounded in the real deliverable + the rework the run went through**, and
     carry a populated **category / trigger / instructions** (a usable procedure), not a bare slogan
     (A12/A13).
-- **Planning docs & specs** under `docs/superpowers/` for the full roadmap (trust & QA, Spec Contract +
-  API QA, learning, retrieval, learning UI, WhatsApp Agent Platform, Researcher agent).
 
 ### Fixed
 - **Auto-grown skills never persisted.** `_persist_skill` referenced a nonexistent `SkillSource.PROJECT`

@@ -41,3 +41,6 @@ __pycache__/
 # Generated mission workspaces / app builds — these belong under ~/ShipwrightProjects (or the
 # configured projects root), never in the repo. Ignore any that land under the orchestrator dir.
 /services/orchestrator/*@*/
+
+# Internal planning/specs — kept local, never pushed (owner request 2026-09-27)
+docs/superpowers/
