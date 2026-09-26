@@ -23,9 +23,11 @@ from sqlalchemy import (
     Boolean,
     DateTime,
     Identity,
+    Index,
     Integer,
     String,
     Text,
+    UniqueConstraint,
     text,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
@@ -130,6 +132,7 @@ class ArtifactRow(Base):
 
 class TicketRow(Base):
     __tablename__ = "tickets"
+    __table_args__ = (UniqueConstraint("workspace_id", "key", name="uq_tickets_ws_key"),)
     id: Mapped[str] = mapped_column(String(40), primary_key=True)
     workspace_id: Mapped[str] = mapped_column(String(40), index=True)
     key: Mapped[str] = mapped_column(String(40), index=True)
@@ -178,6 +181,9 @@ class TicketLinkRow(Base):
 
 class JiraIssueMapRow(Base):
     __tablename__ = "jira_issue_map"
+    __table_args__ = (
+        UniqueConstraint("workspace_id", "entity_type", "entity_id", name="uq_jira_map_entity"),
+    )
     id: Mapped[str] = mapped_column(String(40), primary_key=True)
     workspace_id: Mapped[str] = mapped_column(String(40), index=True)
     entity_type: Mapped[str] = mapped_column(String(12))
@@ -188,6 +194,9 @@ class JiraIssueMapRow(Base):
 
 class JiraOutboxRow(Base):
     __tablename__ = "jira_outbox"
+    __table_args__ = (
+        UniqueConstraint("workspace_id", "idempotency_key", name="uq_jira_outbox_idem"),
+    )
     id: Mapped[str] = mapped_column(String(40), primary_key=True)
     workspace_id: Mapped[str] = mapped_column(String(40), index=True)
     idempotency_key: Mapped[str] = mapped_column(String(80), index=True)
@@ -205,6 +214,7 @@ class JiraOutboxRow(Base):
 
 class CustomRoleRow(Base):
     __tablename__ = "custom_roles"
+    __table_args__ = (UniqueConstraint("workspace_id", "key", name="uq_custom_roles_ws_key"),)
     id: Mapped[str] = mapped_column(String(40), primary_key=True)
     workspace_id: Mapped[str] = mapped_column(String(40), index=True)
     key: Mapped[str] = mapped_column(String(48), index=True)
@@ -330,8 +340,9 @@ class AutonomyPolicyRow(Base):
     mission_key_prefix: Mapped[str] = mapped_column(String(16), default="")
     projects_dir: Mapped[str] = mapped_column(String(512), default="")
     notify_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
-    notify_channels: Mapped[dict] = mapped_column(JSON, default=dict)
-    notify_events: Mapped[dict] = mapped_column(JSON, default=dict)
+    # nullable to match the migration-built schema (0012/0015); the pydantic model coerces None → {}.
+    notify_channels: Mapped[dict | None] = mapped_column(JSON, default=dict, nullable=True)
+    notify_events: Mapped[dict | None] = mapped_column(JSON, default=dict, nullable=True)
     notify_email: Mapped[str] = mapped_column(String(320), default="")
     notify_whatsapp: Mapped[str] = mapped_column(String(32), default="")
     notify_config: Mapped[dict] = mapped_column(JSON, default=dict)
@@ -341,6 +352,9 @@ class ProjectRow(Base):
     """A registered/built codebase (local git repo) in the project registry (plan: multi-project)."""
 
     __tablename__ = "projects"
+    __table_args__ = (
+        Index("ix_projects_ws_path", "workspace_id", "path", unique=True),
+    )
     id: Mapped[str] = mapped_column(String(40), primary_key=True)
     org_id: Mapped[str | None] = mapped_column(String(40), nullable=True)
     workspace_id: Mapped[str] = mapped_column(String(40), index=True)

@@ -332,6 +332,7 @@ class SkillSource(StrEnum):
     BUILT_IN = "built-in"
     CUSTOM = "custom"
     MARKETPLACE = "marketplace"
+    LEARNED = "learned"  # auto-grown by the org from a shipped mission (the compounding-learning loop)
 
 
 class MemoryType(StrEnum):
@@ -339,3 +340,5 @@ class MemoryType(StrEnum):
     FEEDBACK = "feedback"
     REFERENCE = "reference"
     USER = "user"
+    LESSON = "lesson"    # a durable "what went wrong + how it was fixed" from a rework/reflection
+    FAILURE = "failure"  # a run that failed/halted — the most instructive outcome to recall

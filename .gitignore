@@ -37,3 +37,7 @@ __pycache__/
 
 # internal build tracker (not for public repo)
 /progress.md
+
+# Generated mission workspaces / app builds — these belong under ~/ShipwrightProjects (or the
+# configured projects root), never in the repo. Ignore any that land under the orchestrator dir.
+/services/orchestrator/*@*/

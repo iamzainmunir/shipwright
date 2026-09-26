@@ -7,6 +7,8 @@ reference implementation and the fallback.
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
+
 from foundry_core.embedding import cosine, get_embedder
 from foundry_core.models import Memory
 
@@ -27,10 +29,19 @@ def compute_embedding(memory: Memory) -> list[float]:
 
 
 def rank_memories(memories: list[Memory], query: str, k: int) -> list[Memory]:
-    """Top-k memories by cosine similarity to the query (drops zero-similarity matches)."""
-    if not query.strip():
+    """Top-k memories by cosine similarity to the query.
+
+    When the (offline lexical) embedder finds NO overlap — common across different missions, which
+    silently returned nothing before (audit A8) — fall back to the most **recent** memories so prior
+    context (esp. lessons) still surfaces, rather than an empty recall."""
+    if not query.strip() or not memories:
         return []
     q = get_embedder().embed(query)
     scored = [(cosine(q, embedding_for(m)), m) for m in memories]
     scored.sort(key=lambda pair: pair[0], reverse=True)
-    return [m for score, m in scored[:k] if score > 0]
+    positive = [m for score, m in scored[:k] if score > 0]
+    if positive:
+        return positive
+    # zero-overlap fallback → recency (updated_at desc; unstamped last, stable input order otherwise)
+    floor = datetime.min.replace(tzinfo=UTC)
+    return sorted(memories, key=lambda m: m.updated_at or floor, reverse=True)[:k]
