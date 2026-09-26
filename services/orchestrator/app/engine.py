@@ -339,6 +339,9 @@ class RunEngine:
         # The reason QA/review/CTO sent the build back — handed to the builders as explicit fix
         # instructions so a rework is targeted at the real gap, not a blind regenerate.
         self._rework_reason: dict[str, str] = {}
+        # Every rework cause this run went through (not just the last), so a shipped/failed run can
+        # reflect on the whole struggle and distil a grounded lesson/skill (compounding-learning loop).
+        self._rework_log: dict[str, list[str]] = {}
         # Repo/branch the user supplies at the merge gate, so the push targets their real repo.
         self._merge_meta: dict[str, dict[str, str]] = {}  # mission_id → {repo, branch}
         # Multi-project coordinated change (Approach A): mission_id → per-repo build detail
@@ -1222,6 +1225,7 @@ class RunEngine:
             if cycles.get("qa_rework", 0) < MAX_REWORK_CYCLES:
                 cycles["qa_rework"] = cycles.get("qa_rework", 0) + 1
                 self._rework_reason[mission_id] = reason or ""  # QA's fix instructions → the builders
+                await self._record_rework(mission_id, "qa", reason)
                 await note(AgentRoleKey.QA,
                            f"🔁 QA found gaps → back to Backend "
                            f"(rework {cycles['qa_rework']}/{MAX_REWORK_CYCLES})"
@@ -1259,6 +1263,7 @@ class RunEngine:
                             review_mission, reason or "Changes requested",
                             actor=await self._ticket_actor(review_mission, AgentRoleKey.CTO))
                     self._rework_reason[mission_id] = reason or ""  # review's change request → builders
+                    await self._record_rework(mission_id, "review", reason)
                     # Target the rework at the part(s) the review actually flagged (e.g. a frontend
                     # style note goes to the frontend dev only) — don't rebuild backend for a UI change.
                     r_targets = self._failing_subtasks(mission_id, {}, reason)
@@ -1302,6 +1307,7 @@ class RunEngine:
                 cycles["review_rework"] = 0
                 self._rework_targets.pop(mission_id, None)  # a rebuild is a fresh full build, not a slice
                 self._rework_reason[mission_id] = reason or ""  # the CTO's direction → the builders
+                await self._record_rework(mission_id, "cto", reason)
                 await note(AgentRoleKey.CTO,
                            "↩️ CTO decision: rebuild → back to Backend" + (f": {reason}" if reason else ""),
                            "rebuild")
@@ -1723,6 +1729,18 @@ class RunEngine:
         lines = "\n".join(f"- {m.title}: {m.body}" for m in memories)
         return f"Relevant team memory (apply it):\n{lines}\n\n"
 
+    async def _record_rework(self, mission_id: str, phase_key: str, reason: str) -> None:
+        """A backward edge fired (QA/review/CTO sent work back): accumulate the cause for later
+        reflection AND persist it now as a durable LESSON memory, so the richest signal the org
+        produces stops evaporating at run end (audit A1). Best-effort — never fails the run."""
+        reason = (reason or "").strip()
+        if reason:
+            self._rework_log.setdefault(mission_id, []).append(f"[{phase_key}] {reason}")
+        from . import reflection
+        with contextlib.suppress(Exception):
+            mission = await self.store.get_mission(mission_id)
+            await reflection.remember_lesson(self.store, mission, phase_key, reason)
+
     async def _persist_memory(self, mission: Mission) -> None:
         """Autonomously remember what the org shipped, so future missions recall it. Idempotent:
         a project memory keyed to this mission is created once and updated on later ships."""
@@ -1753,25 +1771,37 @@ class RunEngine:
         from foundry_core.enums import SkillCategory, SkillSource
         from foundry_core.models import Skill
 
+        _CATS = {c.value for c in SkillCategory}
         try:
             provider = await self._active_provider()
-            brief = (mission.requirements or mission.summary or mission.title).strip()[:600]
+            # Ground the distillation in what ACTUALLY happened — the real deliverable + any rework the
+            # run went through — not just the ticket text (audit A12), and ask for a usable procedure.
+            brief = (mission.requirements or mission.summary or mission.title).strip()[:500]
+            deliverable = (await self._deliverable_context(mission.id, mission))[:1500]
+            reworks = "; ".join(self._rework_log.get(mission.id, []))[:600]
             result = await provider.complete(
-                system="You curate a software team's reusable skill library. Be terse.",
+                system="You curate a software team's reusable skill library. Be terse and concrete.",
                 prompt=(
                     f"The team just shipped: {mission.title}\n{brief}\n\n"
-                    "Name ONE reusable, generalizable engineering skill the team applied that would "
-                    "help future projects (not specific to this ticket). Reply EXACTLY as:\n"
-                    "NAME: <2-4 word kebab-case name>\nDESC: <one sentence>\n"
+                    f"What was built:\n{deliverable or '(n/a)'}\n\n"
+                    f"Rework it went through (learn from it):\n{reworks or '(none)'}\n\n"
+                    "Name ONE reusable, generalizable skill the team applied that would help FUTURE "
+                    "projects (not specific to this ticket). Reply EXACTLY as:\n"
+                    "NAME: <2-4 word kebab-case name>\n"
+                    "CATEGORY: <one of: product, engineering, quality, security, devops, design>\n"
+                    "TRIGGER: <when to apply it, one line>\n"
+                    "INSTRUCTIONS: <the concrete steps that worked, 1-3 sentences>\n"
                     "If nothing generalizable, reply exactly: NONE"
                 ),
-                purpose="skill", max_tokens=120,
+                purpose="skill", max_tokens=260,
             )
             text = (result.text or "").strip()
             if "NONE" in text.upper() and "NAME:" not in text.upper():
                 return
             name = re.search(r"NAME:\s*(.+)", text, re.IGNORECASE)
-            desc = re.search(r"DESC:\s*(.+)", text, re.IGNORECASE)
+            cat = re.search(r"CATEGORY:\s*(.+)", text, re.IGNORECASE)
+            trig = re.search(r"TRIGGER:\s*(.+)", text, re.IGNORECASE)
+            instr = re.search(r"INSTRUCTIONS:\s*(.+)", text, re.IGNORECASE | re.DOTALL)
             if not name:
                 return
             skill_name = re.sub(r"[^a-z0-9\- ]", "", name.group(1).strip().lower()).replace(" ", "-")[:40]
@@ -1780,11 +1810,17 @@ class RunEngine:
             existing = {s.name for s in await self.store.list_skills(mission.workspace_id)}
             if skill_name in existing:
                 return
+            category = (cat.group(1).strip().lower() if cat else "") if cat else ""
+            category = category if category in _CATS else SkillCategory.ENGINEERING.value
             await self.store.add_skill(Skill(
                 id=new_ulid(), org_id=mission.org_id, workspace_id=mission.workspace_id,
                 name=skill_name,
-                description=(desc.group(1).strip() if desc else f"Applied while shipping {mission.key}."),
-                category=SkillCategory.ENGINEERING, source=SkillSource.PROJECT,
+                description=(trig.group(1).strip() if trig else f"Applied while shipping {mission.key}.")[:200],
+                category=SkillCategory(category),
+                source=SkillSource.LEARNED,  # was SkillSource.PROJECT — a nonexistent member that made
+                                             # this raise every time, so auto-skills were NEVER saved.
+                trigger=(trig.group(1).strip()[:200] if trig else None),
+                instructions=(instr.group(1).strip()[:600] if instr else None),
                 auto_invoke=True, installed=True, uses=0,
             ))
         except Exception:  # pragma: no cover - skill growth is best-effort
@@ -1804,11 +1840,21 @@ class RunEngine:
             AgentRoleKey.QA: "quality", AgentRoleKey.SECURITY: "security",
             AgentRoleKey.DEVOPS: "devops", AgentRoleKey.DESIGNER: "design",
         }.get(role)
-        picked = [s for s in skills if _enum_value(s.category) == role_cat] or skills[:2]
+        # Role-relevant skills only — never inject skills from another discipline (the old `skills[:2]`
+        # fallback surfaced irrelevant skills to every role). Empty is better than off-topic.
+        picked = [s for s in skills if role_cat and _enum_value(s.category) == role_cat]
         if not picked:
             return "", []
-        lines = "\n".join(f"- {s.name}: {s.description}" for s in picked)
-        return f"Apply these team skills where relevant:\n{lines}\n\n", picked
+        # Surface the actual PROCEDURE (instructions), not just the one-line description, so a recalled
+        # skill can change how the agent works (audit A5) — bounded so it can't flood the prompt.
+        lines = []
+        for s in picked:
+            line = f"- {s.name}: {s.description}"
+            instr = (getattr(s, "instructions", None) or "").strip()
+            if instr:
+                line += f"\n    How: {instr[:300]}"
+            lines.append(line)
+        return "Apply these team skills where relevant:\n" + "\n".join(lines) + "\n\n", picked
 
     async def _build_summary(self, mission: Mission) -> str:
         """A short, real description of what's been built (branch + files), so QA/review/CTO verdicts
@@ -2729,6 +2775,12 @@ class RunEngine:
             await self._reset_agents_idle(mission.workspace_id)
             await self._emit(run, mission, AgentRoleKey.DEVOPS, "error", f"Run failed: {message}",
                              payload={"kind": "run.failed"})
+            # A failed run is the MOST instructive outcome — reflect on it so it teaches (audit A11).
+            from . import reflection
+            with contextlib.suppress(Exception):
+                provider = await self._active_provider()
+                context = "; ".join(self._rework_log.get(mission_id, [])) or message
+                await reflection.reflect(self.store, provider, mission, "failed", context)
 
     async def aclose(self) -> None:
         for task in list(self._tasks):
