@@ -37,6 +37,11 @@ make it fire (**P3, part 1**) — all additive/low-risk. The verification-gate s
 - **CI never ran on `master`.** The `push` trigger targeted `main`, but the repo's default branch is
   `master` — so direct pushes to master produced **zero** check-runs and every fix looked "unverified".
   The trigger now covers `[master, main]`, so pushes to master are actually gated.
+- **RLS gate hardcoded a stale table count.** The isolation gate asserted exactly `10` FORCE-RLS tables /
+  `ws_isolation` policies; the schema has since grown to 19 tenant tables, so the gate failed even though
+  every table is correctly protected. Rewritten to be **self-maintaining** — it derives the tenant-table
+  set from the `workspace_id` column and asserts *each* one has FORCE RLS + a `ws_isolation` policy (with
+  a floor so it can't pass vacuously). A new tenant table that forgets RLS now trips the gate by name.
 
 ### Changed
 - **Pipeline safety-stop is derived from the loop caps** (`MAX_CTO_DECISIONS`, `MAX_REWORK_CYCLES`, …)
