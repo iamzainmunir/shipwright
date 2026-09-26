@@ -112,8 +112,16 @@ MAX_REWORK_CYCLES = 3   # build↔QA and review→Backend reworks before forcing
 MAX_ESCALATIONS = 2     # review→CTO consultations before the CTO must pick a direction
 MAX_ERROR_ESCALATIONS = 2  # CTO-guided retries of a FAILED phase before the user is involved
 MAX_PUSH_REGATES = 3    # times the merge gate re-opens after a rejected push before giving up
-_PIPELINE_SAFETY_STOP = 40  # absolute backstop on total phase executions (never expected to hit)
 MAX_CTO_DECISIONS = 2   # CTO consultations before the work is escalated to the user (a real cap)
+# Absolute backstop on total phase executions — DERIVED from the loop caps so it is always an OUTER
+# safety net (never the effective limiter) and cannot drift from them. Each CTO decision resets the
+# rework budgets, so worst-case ≈ (decisions+1) segments, each running the canonical phases plus its full
+# build↔QA + review rework and escalation budgets, plus the merge-regate and error-escalation tails.
+_CANON_PHASE_COUNT = 7  # intake→spec→build→review→qa→ship (+ CTO decision); an estimate, not a gate
+_PIPELINE_SAFETY_STOP = (
+    (MAX_CTO_DECISIONS + 1) * (_CANON_PHASE_COUNT + 2 * MAX_REWORK_CYCLES + MAX_ESCALATIONS)
+    + MAX_PUSH_REGATES + MAX_ERROR_ESCALATIONS
+)  # = 50 with current caps; scales with them, always ≥ the real convergence bound
 # Routing sentinel: STOP the pipeline and hand the mission to the user (a fail-safe block), instead of
 # forcing an unverified build forward to ship when automated rework/escalation budgets are exhausted.
 _HALT = "__halt__"
@@ -316,6 +324,7 @@ class RunEngine:
         self.sandbox_enabled: bool = s.sandbox_enabled
         self.sandbox_root: str | None = s.sandbox_root or None
         self.projects_root: str = s.projects_root
+        self._run_cost_budget: int = s.run_cost_budget_cents  # per-run LLM cost ceiling (cents); 0 = off
         self._connector = GitHubConnector(s.github_token, s.github_repo, s.github_base)
         self._builds: dict[str, tuple[object, str]] = {}  # mission_id → (sandbox, branch)
         # Ground-truth facts about the LATEST build, so QA/review/CTO judge the REAL deliverable and
@@ -913,6 +922,15 @@ class RunEngine:
                     # work — never ship or gate a cancelled run.
                     cur = await self.store.get_run(run_id)
                     if cur is None or _enum_value(cur.status) == "cancelled":
+                        return
+                    # Cost ceiling (Rule 0: 0 = off). A stuck run must stop BEFORE more spend, and must
+                    # NEVER ship on budget exhaustion — hand it to the user (fail-safe halt).
+                    if self._over_budget(cur.cost_cents):
+                        await self._halt_for_user(
+                            run_id, mission_id, AgentRoleKey.CTO,
+                            f"run cost reached the ${self._run_cost_budget / 100:.2f} budget "
+                            f"(${int(cur.cost_cents or 0) / 100:.2f} spent) — paused for your review")
+                        tracing.set_attributes(run_span, {tracing.ATTR_RESULT: "blocked"})
                         return
                     phase = _PHASE_BY_KEY[phase_key]
                     visits[phase_key] = visits.get(phase_key, 0) + 1
@@ -2390,6 +2408,11 @@ class RunEngine:
             return extract_criteria(spec_text) if spec_text else []
         except Exception:  # noqa: BLE001
             return []
+
+    def _over_budget(self, cost_cents: object) -> bool:
+        """True when a per-run cost ceiling is set and this run has reached it (Rule 0: 0 = off).
+        The loop checks this each iteration and halts-for-user rather than spending or shipping past it."""
+        return self._run_cost_budget > 0 and int(cost_cents or 0) >= self._run_cost_budget
 
     def _build_is_healthy(self, mission_id: str) -> tuple[bool, str]:
         """Ground-truth health of the latest build for this mission. When unknown (e.g. after a
