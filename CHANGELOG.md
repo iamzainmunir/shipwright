@@ -30,6 +30,13 @@ semantics change (A2/A15) and the larger feature phases follow.
 - **Auto-grown skills never persisted.** `_persist_skill` referenced a nonexistent `SkillSource.PROJECT`
   and raised inside a swallow-all `except`, so the skill library never actually grew. Fixed with a real
   `SkillSource.LEARNED`. (root cause behind "skills aren't really learned")
+- **A red test suite could ship (A15).** `_assess_build` couldn't tell a green build from an untested
+  one. A `tests_ran` signal now threads agent → `BuildResult` → build-facts, and `_assess_build` marks a
+  build **unhealthy when a suite actually ran and failed** (a known-red build no longer ships); "no tests
+  run" stays advisory, so an untested build is never false-failed.
+- **CI `alembic check` gate.** Reconciled the ORM with the migration-built schema (unique
+  constraints/indexes on `tickets`/`jira_issue_map`/`jira_outbox`/`custom_roles`/`projects`, and the
+  `autonomy_policies` notify columns kept `NOT NULL` to match a fresh `alembic upgrade head`).
 
 ### Changed
 - **Pipeline safety-stop is derived from the loop caps** (`MAX_CTO_DECISIONS`, `MAX_REWORK_CYCLES`, …)

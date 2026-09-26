@@ -78,6 +78,7 @@ class BuildResult:
     cost_cents: int = 0
     steps: int = 0
     files_written: int = 0  # successful fs_write calls — the direct "did the build produce work" signal
+    tests_ran: bool = False  # a test suite actually executed (distinguishes red from untested — A15)
 
 
 def _slug(title: str) -> str:
@@ -109,6 +110,7 @@ async def real_build(
             branch=branch, diff=diff, files=files, tests_passed=result.tests_passed,
             summary=summary, tokens_in=result.tokens_in, tokens_out=result.tokens_out,
             cost_cents=result.cost_cents, steps=result.steps, files_written=result.files_written,
+            tests_ran=result.tests_ran,
         ),
         sb,
     )
@@ -155,6 +157,7 @@ async def build_from_mission(
             branch="main", diff=diff, files=files, tests_passed=result.tests_passed,
             summary=summary, tokens_in=result.tokens_in, tokens_out=result.tokens_out,
             cost_cents=result.cost_cents, steps=result.steps, files_written=result.files_written,
+            tests_ran=result.tests_ran,
         ),
         sb,
         path,
@@ -535,6 +538,7 @@ async def build_parallel(
     # before starting the next — so later agents read and build on real upstream code, not guesses.
     merged, skipped, failed, ti, to, cc, steps, fw = [], [], 0, 0, 0, 0, 0, 0
     all_passed = True
+    any_ran = False  # did ANY subtask actually run a test suite (A15 — red vs untested)
     seq = 0
     for wave in waves:
         # Worktrees created SEQUENTIALLY (concurrent `git worktree add` contends on git's global locks).
@@ -567,6 +571,7 @@ async def build_parallel(
             steps += result.steps
             fw += result.files_written
             all_passed = all_passed and result.tests_passed
+            any_ran = any_ran or result.tests_ran
             ok, _out = await sb.merge_branch(branch)
             (merged if ok else skipped).append(branch)
             await sb.remove_worktree_path(wt.dir)
@@ -601,6 +606,7 @@ async def build_parallel(
         BuildResult(
             branch="main", diff=diff, files=files, tests_passed=all_passed and not skipped and not failed,
             summary=parts, tokens_in=ti, tokens_out=to, cost_cents=cc, steps=steps, files_written=fw,
+            tests_ran=any_ran,
         ),
         sb,
         path,
@@ -643,6 +649,7 @@ async def change_in_repo(
             branch=branch, diff=diff, files=files, tests_passed=result.tests_passed,
             summary=summary, tokens_in=result.tokens_in, tokens_out=result.tokens_out,
             cost_cents=result.cost_cents, steps=result.steps, files_written=result.files_written,
+            tests_ran=result.tests_ran,
         ),
         sb,
         path,

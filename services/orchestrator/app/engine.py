@@ -305,6 +305,10 @@ def _assess_build(result: object) -> tuple[bool, str]:
         return False, "the build wrote no files (0 fs_write calls) — no real work was produced"
     if not meaningful:
         return False, "the build produced only scaffold files (README/.gitignore), no real code"
+    # A15: a suite that ACTUALLY RAN and is red must not ship. "No tests run" stays advisory (unknown,
+    # handled elsewhere) — this only blocks a KNOWN-failing build, so it never false-fails an untested one.
+    if bool(getattr(result, "tests_ran", False)) and not bool(getattr(result, "tests_passed", True)):
+        return False, "the test suite ran and is failing — fix the failing tests before shipping"
     return True, ""
 
 
@@ -2299,7 +2303,8 @@ class RunEngine:
                 "files": list(result.files),
             })
         self._build_facts[mission_id] = {
-            "files": list(result.files), "tests_passed": result.tests_passed, "steps": result.steps,
+            "files": list(result.files), "tests_passed": result.tests_passed,
+            "tests_ran": getattr(result, "tests_ran", False), "steps": result.steps,
             "diff": result.diff, "summary": result.summary, "branch": result.branch,
             "healthy": healthy, "why": why, "subtasks": story_slices,
             # net writes in THIS build (0 on a rework ⇒ no progress → the stuck-loop guard fires)
@@ -2378,7 +2383,7 @@ class RunEngine:
             SimpleNamespace(files=files, steps=1, summary="", files_written=len(files)))
         self._builds[mission_id] = (sb, "main")
         self._build_facts[mission_id] = {
-            "files": files, "tests_passed": False, "steps": 1, "diff": diff,
+            "files": files, "tests_passed": False, "tests_ran": False, "steps": 1, "diff": diff,
             "summary": f"resumed: {len(files)} file(s) already on disk", "branch": "main",
             "healthy": healthy, "why": why, "subtasks": [], "files_written": len(files),
         }

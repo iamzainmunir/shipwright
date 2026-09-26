@@ -36,6 +36,7 @@ class AgentResult:
     tool_log: list[str] = field(default_factory=list)
     final_text: str = ""
     files_written: int = 0  # count of successful fs_write calls — 0 ⇒ the build produced nothing
+    tests_ran: bool = False  # a test command actually executed (lets QA tell red from untested)
 
 
 _CODE_BLOCK_RE = re.compile(r"```(?P<info>[^\n]*)\n(?P<body>.*?)(?:\n)?```", re.DOTALL)
@@ -174,6 +175,7 @@ async def run_agent(
     tools = tool_specs()
     messages: list[dict[str, Any]] = [{"role": "user", "content": task}]
     tests_passed = False
+    tests_ran = False
     ti = to = cc = steps = 0
     tool_log: list[str] = []
     final = ""
@@ -239,8 +241,9 @@ async def run_agent(
                     )
                     ok = meta.get("exit", 0) == 0 if tc.name == "cmd_run" else True
                     tracing.set_attributes(tool_span, {tracing.ATTR_TOOL_OK: ok})
-                if ran_tests and ok:
-                    tests_passed = True
+                if ran_tests:
+                    tests_ran = True          # a suite executed (pass or fail) — no longer "untested"
+                    tests_passed = tests_passed or ok
                 if tc.name == "fs_write" and not meta.get("error"):
                     files_written += 1
                 tool_log.append(
@@ -251,4 +254,5 @@ async def run_agent(
                 results.append({"type": "tool_result", "tool_use_id": tc.id, "content": out})
             messages.append({"role": "user", "content": results})
 
-    return AgentResult(steps, tests_passed, ti, to, cc, tool_log, final, files_written)
+    return AgentResult(steps, tests_passed, ti, to, cc, tool_log, final, files_written,
+                       tests_ran=tests_ran)

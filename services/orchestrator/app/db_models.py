@@ -340,9 +340,10 @@ class AutonomyPolicyRow(Base):
     mission_key_prefix: Mapped[str] = mapped_column(String(16), default="")
     projects_dir: Mapped[str] = mapped_column(String(512), default="")
     notify_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
-    # nullable to match the migration-built schema (0012/0015); the pydantic model coerces None → {}.
-    notify_channels: Mapped[dict | None] = mapped_column(JSON, default=dict, nullable=True)
-    notify_events: Mapped[dict | None] = mapped_column(JSON, default=dict, nullable=True)
+    # NOT NULL + server_default '{}' per migration 0012 (a fresh `alembic upgrade head`); the pydantic
+    # model coerces None → {} on read for older rows. (server_default isn't compared by `alembic check`.)
+    notify_channels: Mapped[dict] = mapped_column(JSON, default=dict)
+    notify_events: Mapped[dict] = mapped_column(JSON, default=dict)
     notify_email: Mapped[str] = mapped_column(String(320), default="")
     notify_whatsapp: Mapped[str] = mapped_column(String(32), default="")
     notify_config: Mapped[dict] = mapped_column(JSON, default=dict)
