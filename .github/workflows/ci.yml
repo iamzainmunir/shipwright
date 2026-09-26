@@ -4,7 +4,7 @@ name: ci
 # check points straight at the culprit. Versions/ports come from docs/VERSIONS.md.
 on:
   push:
-    branches: [main]
+    branches: [master, main]
   pull_request:
 
 # Only the newest run per ref survives; older in-flight runs are cancelled.

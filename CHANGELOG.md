@@ -37,6 +37,9 @@ semantics change (A2/A15) and the larger feature phases follow.
 - **CI `alembic check` gate.** Reconciled the ORM with the migration-built schema (unique
   constraints/indexes on `tickets`/`jira_issue_map`/`jira_outbox`/`custom_roles`/`projects`, and the
   `autonomy_policies` notify columns kept `NOT NULL` to match a fresh `alembic upgrade head`).
+- **CI never ran on `master`.** The `push` trigger targeted `main`, but the repo's default branch is
+  `master` — so direct pushes to master produced **zero** check-runs and every fix looked "unverified".
+  The trigger now covers `[master, main]`, so pushes to master are actually gated.
 
 ### Changed
 - **Pipeline safety-stop is derived from the loop caps** (`MAX_CTO_DECISIONS`, `MAX_REWORK_CYCLES`, …)
