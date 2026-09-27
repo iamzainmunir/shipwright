@@ -22,6 +22,11 @@ make it fire (**P3, part 1**) — all additive/low-risk. The verification-gate s
   - auto-grown skills are **grounded in the real deliverable + the rework the run went through**, and
     carry a populated **category / trigger / instructions** (a usable procedure), not a bare slogan
     (A12/A13).
+- **Learning is now visible (P7, backend).** The engine emits compact learning events so a UI (and the
+  run event stream) can show what knowledge is actually in play, live: `skill.recalled` (with each skill's
+  effectiveness + uses), `memory.recalled`, `recall.empty` (so silent non-use is visible — surfaces A8),
+  `lesson.written` (from a rework), and `skill.learned` (a newly distilled skill). `GET /skills` now
+  returns effectiveness (`successes`/`fails`/`uses`); the web panels consume all of this.
 - **WhatsApp conversational control plane (P4).** You can now drive missions from WhatsApp free text —
   **start** a mission, **cancel/end** it, **answer the AI's clarifying questions**, **approve/reject**
   gates, and query **status** — with a per-sender **session state machine** (`wa_sessions`, TTL-bounded,

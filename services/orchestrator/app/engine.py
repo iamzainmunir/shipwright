@@ -1839,15 +1839,16 @@ class RunEngine:
                              payload={"kind": "research.brief", "briefId": brief.id,
                                       "findings": len(brief.findings), "sources": brief.sources})
 
-    async def _recall_memory(self, mission: Mission) -> str:
+    async def _recall_memory(self, mission: Mission) -> tuple[str, list]:
         """Retrieve the workspace memories most relevant to this mission and format them for the
-        prompt, so the team applies past decisions instead of relearning them (Phase 9)."""
+        prompt, so the team applies past decisions instead of relearning them (Phase 9). Returns the
+        formatted block AND the recalled memory objects (so the caller can surface them — P7)."""
         query = f"{mission.title} {mission.summary or ''}"
         memories = await self.store.search_memories(query, k=3)
         if not memories:
-            return ""
+            return "", []
         lines = "\n".join(f"- {m.title}: {m.body}" for m in memories)
-        return f"Relevant team memory (apply it):\n{lines}\n\n"
+        return f"Relevant team memory (apply it):\n{lines}\n\n", list(memories)
 
     async def _record_rework(self, mission_id: str, phase_key: str, reason: str) -> None:
         """A backward edge fired (QA/review/CTO sent work back): accumulate the cause for later
@@ -1860,6 +1861,26 @@ class RunEngine:
         with contextlib.suppress(Exception):
             mission = await self.store.get_mission(mission_id)
             await reflection.remember_lesson(self.store, mission, phase_key, reason)
+            # P7: surface that a lesson was written from this rework (visible learning).
+            if mission is not None and reason:
+                r = await self._latest_run(mission_id)
+                if r is not None:
+                    await self._emit(r, mission, AgentRoleKey.CTO, "status",
+                                     f"📝 Lesson learned from {phase_key} rework: {reason[:80]}",
+                                     payload={"kind": "lesson.written", "phase": phase_key})
+
+    async def _latest_run(self, mission_id: str):
+        """The most-recent run for a mission (by started_at), or None. Best-effort helper for emitting
+        learning events from places that only carry a mission id."""
+        try:
+            mission = await self.store.get_mission(mission_id)
+            if mission is None:
+                return None
+            runs = [r for r in await self.store.list_runs(mission.workspace_id)
+                    if r.mission_id == mission_id]
+            return max(runs, key=lambda r: r.started_at or "", default=None)
+        except Exception:  # noqa: BLE001
+            return None
 
     async def _persist_memory(self, mission: Mission) -> None:
         """Autonomously remember what the org shipped, so future missions recall it. Idempotent:
@@ -1943,6 +1964,13 @@ class RunEngine:
                 instructions=(instr.group(1).strip()[:600] if instr else None),
                 auto_invoke=True, installed=True, uses=0,
             ))
+            # P7: surface that the org grew a new skill (visible learning).
+            r = await self._latest_run(mission.id)
+            if r is not None:
+                await self._emit(r, mission, AgentRoleKey.CTO, "status",
+                                 f"✨ Learned a new skill: {skill_name}",
+                                 payload={"kind": "skill.learned", "name": skill_name,
+                                          "category": category})
         except Exception:  # pragma: no cover - skill growth is best-effort
             pass
 
@@ -1987,6 +2015,32 @@ class RunEngine:
                 line += f"\n    How: {instr[:300]}"
             lines.append(line)
         return "Apply these team skills where relevant:\n" + "\n".join(lines) + "\n\n", picked
+
+    async def _emit_learning(self, run: Run, mission: Mission, role: AgentRoleKey,
+                             skills: list, mems: list) -> None:
+        """P7 — emit compact learning events so the UI can show what knowledge is in play, live:
+        ``skill.recalled`` (names + effectiveness), ``memory.recalled`` (titles), and ``recall.empty``
+        when neither fired (surfacing the A8 'recall returns nothing' case). Best-effort, never raises."""
+        with contextlib.suppress(Exception):
+            if skills:
+                await self._emit(
+                    run, mission, role, "status",
+                    "🧠 Recalled skills: " + ", ".join(s.name for s in skills),
+                    payload={"kind": "skill.recalled", "role": _enum_value(role),
+                             "skills": [{"id": s.id, "name": s.name,
+                                         "effectiveness": round(_skill_effectiveness(s), 2),
+                                         "uses": getattr(s, "uses", 0)} for s in skills]})
+            if mems:
+                await self._emit(
+                    run, mission, role, "status",
+                    "📚 Recalled memory: " + "; ".join(m.title for m in mems),
+                    payload={"kind": "memory.recalled", "role": _enum_value(role),
+                             "memories": [{"id": m.id, "title": m.title,
+                                           "type": _enum_value(getattr(m, "type", ""))} for m in mems]})
+            if not skills and not mems:
+                await self._emit(
+                    run, mission, role, "status", "🫧 No skills/memory recalled for this step",
+                    payload={"kind": "recall.empty", "role": _enum_value(role)})
 
     async def _record_skill_outcome(self, mission_id: str, *, success: bool) -> None:
         """A14 — credit (+success) or debit (+fail) every skill recalled during this run, from its
@@ -2098,7 +2152,7 @@ class RunEngine:
         # Role-scoped system prompt keeps each agent in its lane (e.g. QA verifies, CTO reviews).
         system = role_system_prompt(_enum_value(phase.role)) or _SYSTEM.get(
             phase.role, "You are a helpful engineering agent.")
-        recalled = await self._recall_memory(mission)
+        recalled, recalled_mems = await self._recall_memory(mission)
         verdict_ask = _VERDICT_ASK.get(phase.key, "")
         # P1: the spec phase must emit the machine-checkable UI + API contract blocks.
         if phase.key == "spec":
@@ -2126,6 +2180,9 @@ class RunEngine:
         if phase.key == "build.api" and attempt > 1:
             contract_line = (await self._contract_feedback_block(mission_id)) + contract_line
         skills_line, used_skills = await self._recall_skills(mission, phase.role)
+        # P7: surface what knowledge fed this phase (live) — recalled skills/memories, or the fact that
+        # recall was empty (so silent non-use is visible, A8). Best-effort, never fails a phase.
+        await self._emit_learning(run, mission, phase.role, used_skills, recalled_mems)
         prompt = (
             f"{mission.title}\n\n"
             f"Summary: {mission.summary or '(none)'}\n"
