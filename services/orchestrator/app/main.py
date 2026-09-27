@@ -105,6 +105,15 @@ async def _email_poll_loop() -> None:
     await run_forever(get_store(), get_engine())
 
 
+async def _wa_agent_loop() -> None:
+    """WhatsApp Agent Platform channel (P5) — long-poll, no public URL. Inert unless the WhatsApp Agent
+    key is configured in Settings (Rule 0)."""
+    from app.state import get_engine
+    from app.wa_agent_channel import run_forever
+
+    await run_forever(get_store(), get_engine())
+
+
 def create_app(settings: Settings | None = None) -> FastAPI:
     settings = settings or get_settings()
     configure_logging(settings.log_level, settings.env)
@@ -136,12 +145,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         # Two-way integrations: both no-op until their channel + credentials are configured.
         slack_task = asyncio.create_task(_slack_socket_loop())
         email_task = asyncio.create_task(_email_poll_loop())
+        wa_agent_task = asyncio.create_task(_wa_agent_loop())
         try:
             yield
         finally:
-            for task in (jira_task, slack_task, email_task):
+            bg_tasks = (jira_task, slack_task, email_task, wa_agent_task)
+            for task in bg_tasks:
                 task.cancel()
-            for task in (jira_task, slack_task, email_task):
+            for task in bg_tasks:
                 with contextlib.suppress(asyncio.CancelledError, Exception):
                     await task
             # Terminate any Run-app preview servers this process spawned, so their ports/PIDs

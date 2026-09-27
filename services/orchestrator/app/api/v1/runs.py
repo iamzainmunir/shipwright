@@ -1121,7 +1121,7 @@ class SettingsPatch(_Body):
 # the UI never sees a stored password/token/webhook but can tell (via a ``<key>Set`` bool) one is saved.
 _NOTIFY_SECRET_KEYS = {"smtpPassword", "twilioAuthToken", "whatsappToken", "slackWebhook",
                        "slackSigningSecret", "whatsappAppSecret", "whatsappVerifyToken",
-                       "slackAppToken", "slackBotToken", "imapPassword"}
+                       "slackAppToken", "slackBotToken", "imapPassword", "whatsappAgentKey"}
 
 
 def _public_settings(policy) -> dict:

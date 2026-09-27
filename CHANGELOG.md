@@ -27,6 +27,14 @@ make it fire (**P3, part 1**) — all additive/low-risk. The verification-gate s
   effectiveness + uses), `memory.recalled`, `recall.empty` (so silent non-use is visible — surfaces A8),
   `lesson.written` (from a rework), and `skill.learned` (a newly distilled skill). `GET /skills` now
   returns effectiveness (`successes`/`fails`/`uses`); the web panels consume all of this.
+- **WhatsApp Agent Platform channel (P5).** A **no-tunnel** transport for the P4 control plane: create a
+  "Shipwright" agent inside WhatsApp (Settings → Agents), paste its API key into `notify_config`, and drive
+  your org from a normal WhatsApp chat — **no Twilio, no Cloud-API app, no public URL**. Receive is a
+  server-side **long-poll** (`GET /agent/v1/updates`) with a persisted **offset cursor** (restart-safe: no
+  missed or replayed messages; cold start skips the 30-day backlog). Reuses the exact P4 brain
+  (`handle_stateful`), self-throttles sends (≤12/min) with 429/503 backoff, replies only to `user:<id>`,
+  and truncates to 4096 chars. **Inert until the key is configured** (Rule 0); the key is a redacted secret.
+  Privacy caveat surfaced: this channel is **not end-to-end encrypted**.
 - **WhatsApp conversational control plane (P4).** You can now drive missions from WhatsApp free text —
   **start** a mission, **cancel/end** it, **answer the AI's clarifying questions**, **approve/reject**
   gates, and query **status** — with a per-sender **session state machine** (`wa_sessions`, TTL-bounded,
@@ -115,7 +123,7 @@ make it fire (**P3, part 1**) — all additive/low-risk. The verification-gate s
   one-line description, so a recalled skill can actually change how the agent works. (audit A5/A6)
 
 ### Planned (tracked, next)
-- P7 learning transparency UI · P5 WhatsApp Agent Platform long-poll channel (transport).
+- P7 learning transparency UI (web panels — in progress).
 
 ## [2026-09] — on `master`
 
