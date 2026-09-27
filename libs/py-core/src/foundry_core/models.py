@@ -240,6 +240,10 @@ class Skill(FoundryModel):
     auto_invoke: bool = False
     installed: bool = True
     uses: int = 0
+    # A14 — effectiveness: runs that recalled this skill and then shipped (success) vs reworked/halted
+    # (fail). Drives recall ranking + auto-demotion of skills that don't help.
+    successes: int = 0
+    fails: int = 0
 
 
 class ResearchFinding(FoundryModel):

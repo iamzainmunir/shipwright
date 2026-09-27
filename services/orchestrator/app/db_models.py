@@ -298,6 +298,8 @@ class SkillRow(Base):
     auto_invoke: Mapped[bool] = mapped_column(Boolean, default=False)
     installed: Mapped[bool] = mapped_column(Boolean, default=True)
     uses: Mapped[int] = mapped_column(Integer, default=0)
+    successes: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    fails: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
 
 
 class MemoryRow(Base):

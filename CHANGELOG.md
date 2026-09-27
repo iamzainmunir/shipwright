@@ -95,6 +95,11 @@ make it fire (**P3, part 1**) — all additive/low-risk. The verification-gate s
   a floor so it can't pass vacuously). A new tenant table that forgets RLS now trips the gate by name.
 
 ### Changed
+- **Skills now earn their place (A14).** Each skill tracks `successes`/`fails` — runs that recalled it and
+  then shipped vs reworked/halted. Recall **ranks by effectiveness** (ship-rate, tie-broken by uses) and
+  injects only the top few role-relevant skills; a skill with enough evidence and a poor ship-rate is
+  **auto-demoted** (`auto_invoke=False`) so the library stops re-injecting what doesn't help. Metrics were
+  previously write-only. (migration 0019)
 - **Pipeline safety-stop is derived from the loop caps** (`MAX_CTO_DECISIONS`, `MAX_REWORK_CYCLES`, …)
   instead of a magic `40`, so it is always an outer net and cannot drift from the caps. (audit A4)
 - **Memory recall no longer silently returns nothing.** When the offline lexical embedder finds no
@@ -105,7 +110,6 @@ make it fire (**P3, part 1**) — all additive/low-risk. The verification-gate s
   one-line description, so a recalled skill can actually change how the agent works. (audit A5/A6)
 
 ### Planned (tracked, next)
-- **A14** skill/agent effectiveness metrics driving routing (needs a migration).
 - P7 learning transparency UI · P5 WhatsApp Agent Platform long-poll channel (transport).
 
 ## [2026-09] — on `master`

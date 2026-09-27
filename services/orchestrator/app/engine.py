@@ -282,6 +282,26 @@ def _parse_verdict(phase_key: str, text: str) -> Outcome:
 # Files that don't count as "real work" when judging whether a build actually produced something.
 _SCAFFOLD_FILES = {"readme.md", "license", "license.md", ".gitignore", ".gitattributes"}
 
+# A14 — skill effectiveness → recall ranking + retirement.
+_SKILL_RECALL_TOPK = 5          # inject at most this many role-relevant skills into a prompt
+_SKILL_MIN_SAMPLES = 4          # need this many outcomes before a skill can be judged unhelpful
+_SKILL_DEMOTE_BELOW = 0.34      # effectiveness under this (with enough samples) ⇒ auto-demote
+
+
+def _skill_effectiveness(skill: object) -> float:
+    """Ship-rate of runs that recalled this skill: successes/(successes+fails). A skill with no outcome
+    history yet gets a neutral 0.5 prior so it isn't unfairly ranked below a barely-proven one."""
+    s = int(getattr(skill, "successes", 0) or 0)
+    f = int(getattr(skill, "fails", 0) or 0)
+    return (s / (s + f)) if (s + f) > 0 else 0.5
+
+
+def _skill_should_demote(skill: object) -> bool:
+    """True when a skill has enough evidence and a poor ship-rate — retire it from auto-invoke."""
+    s = int(getattr(skill, "successes", 0) or 0)
+    f = int(getattr(skill, "fails", 0) or 0)
+    return (s + f) >= _SKILL_MIN_SAMPLES and _skill_effectiveness(skill) < _SKILL_DEMOTE_BELOW
+
 
 def _assess_build(result: object) -> tuple[bool, str]:
     """Objective health of a build result — the gate a hallucinated verdict cannot pass.
@@ -340,6 +360,9 @@ class RunEngine:
         # disk, or runtime QA evidence (screenshots/smoke/API checks). Absence ⇒ unverified. An AUTONOMOUS
         # merge auto-approves ONLY when verified; an unverified build never ships without a human.
         self._verified: dict[str, bool] = {}  # mission_id → real evidence exists
+        # A14 — skills recalled during THIS run, per mission, so a terminal outcome (ship=success,
+        # fail/halt=fail) can credit/debit their effectiveness and retire the ones that don't help.
+        self._recalled_skills: dict[str, set[str]] = {}
         # The PM's task graph from the `plan` phase — the build REUSES it (never re-decomposes) so the
         # pre-created tickets and the build's subtasks line up. mission_id → list[devloop.Subtask].
         self._plans: dict[str, list] = {}
@@ -900,6 +923,7 @@ class RunEngine:
         await self._reset_agents_idle(shipped.workspace_id)
         await self._persist_memory(shipped)  # the org remembers what it shipped
         await self._persist_skill(shipped)   # …and codifies a reusable skill it applied
+        await self._record_skill_outcome(mission_id, success=True)  # A14: recalled skills helped → ship
         if run:
             await self._emit(run, shipped, AgentRoleKey.DEVOPS, "deploy",
                              f"✓ {shipped.key} — pipeline complete, merge approved")
@@ -1938,9 +1962,21 @@ class RunEngine:
         }.get(role)
         # Role-relevant skills only — never inject skills from another discipline (the old `skills[:2]`
         # fallback surfaced irrelevant skills to every role). Empty is better than off-topic.
-        picked = [s for s in skills if role_cat and _enum_value(s.category) == role_cat]
-        if not picked:
+        relevant = [s for s in skills if role_cat and _enum_value(s.category) == role_cat]
+        if not relevant:
             return "", []
+        # A14: rank by EFFECTIVENESS (ship-rate on runs that used the skill), tie-broken by uses, and
+        # take the top-k — so the skills that actually help surface first, and a proven-unhelpful skill
+        # is auto-demoted (auto_invoke=False) once it has enough evidence.
+        for s in relevant:
+            if _skill_should_demote(s):
+                with contextlib.suppress(Exception):
+                    await self.store.update_skill(s.id, auto_invoke=False)
+        ranked = sorted(relevant, key=lambda s: (_skill_effectiveness(s), getattr(s, "uses", 0)),
+                        reverse=True)
+        picked = ranked[:_SKILL_RECALL_TOPK]
+        # Remember which skills fed this run so a terminal outcome can score them (A14).
+        self._recalled_skills.setdefault(mission.id, set()).update(s.id for s in picked)
         # Surface the actual PROCEDURE (instructions), not just the one-line description, so a recalled
         # skill can change how the agent works (audit A5) — bounded so it can't flood the prompt.
         lines = []
@@ -1951,6 +1987,25 @@ class RunEngine:
                 line += f"\n    How: {instr[:300]}"
             lines.append(line)
         return "Apply these team skills where relevant:\n" + "\n".join(lines) + "\n\n", picked
+
+    async def _record_skill_outcome(self, mission_id: str, *, success: bool) -> None:
+        """A14 — credit (+success) or debit (+fail) every skill recalled during this run, from its
+        terminal outcome (ship = success; fail/halt = fail). Drives recall ranking + retirement.
+        Best-effort: never raises."""
+        ids = self._recalled_skills.pop(mission_id, set())
+        if not ids:
+            return
+        field = "successes" if success else "fails"
+        try:
+            by_id = {s.id: s for s in await self.store.list_skills()}
+        except Exception:  # noqa: BLE001
+            return
+        for sid in ids:
+            s = by_id.get(sid)
+            if s is None:
+                continue
+            with contextlib.suppress(Exception):
+                await self.store.update_skill(sid, **{field: int(getattr(s, field, 0) or 0) + 1})
 
     async def _build_summary(self, mission: Mission) -> str:
         """A short, real description of what's been built (branch + files), so QA/review/CTO verdicts
@@ -3043,6 +3098,8 @@ class RunEngine:
                 provider = await self._active_provider()
                 context = "; ".join(self._rework_log.get(mission_id, [])) or message
                 await reflection.reflect(self.store, provider, mission, "failed", context)
+        # A14: skills recalled on a run that then failed get a fail mark (retire the unhelpful).
+        await self._record_skill_outcome(mission_id, success=False)
 
     async def aclose(self) -> None:
         for task in list(self._tasks):
