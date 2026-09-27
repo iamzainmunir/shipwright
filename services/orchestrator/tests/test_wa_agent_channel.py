@@ -45,6 +45,7 @@ def _engine():
 
 async def _configure(store, key="secret-agent-token"):
     await store.update_settings(notify_enabled=True,
+                                notify_channels={"whatsapp_agent": True},
                                 notify_config={"whatsappAgentKey": key})
 
 

@@ -27,6 +27,7 @@ from .wa_inbound import handle_stateful
 
 log = structlog.get_logger(__name__)
 
+CH_WA_AGENT = "whatsapp_agent"   # notify_channels toggle key (mirrors the Settings card)
 _BASE_URL = "https://api.whatsapp.com/agent/v1"
 _POLL_TIMEOUT_S = 15      # long-poll hold (manual: 0–25)
 _POLL_LIMIT = 50          # updates per poll (manual: ≤100)
@@ -120,6 +121,8 @@ async def poll_once(store, engine, *, client: httpx.AsyncClient) -> str | None:
     prefs = await store.get_settings()
     if not getattr(prefs, "notify_enabled", False):
         return None
+    if not (getattr(prefs, "notify_channels", None) or {}).get(CH_WA_AGENT, False):
+        return None  # channel toggled off in Settings — inert
     cfg = _cfg_of(prefs)
     if not _token(cfg):
         return None  # channel not configured — inert (Rule 0)

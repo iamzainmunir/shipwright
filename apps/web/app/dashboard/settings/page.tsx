@@ -33,6 +33,7 @@ const money0 = (n: number) => `$${Math.round(n).toLocaleString("en-US")}`;
 
 const NOTIFY_CHANNELS: { key: string; label: string }[] = [
   { key: "email", label: "Email" },
+  { key: "whatsapp_agent", label: "WhatsApp · Agent (no tunnel)" },
   { key: "whatsapp_twilio", label: "WhatsApp · Twilio" },
   { key: "whatsapp_meta", label: "WhatsApp · Meta" },
   { key: "slack", label: "Slack" },
@@ -47,6 +48,11 @@ const CHANNEL_HELP: Record<string, { note: string; href: string; label: string }
     note: "Enter your SMTP details below (a Gmail App Password, Amazon SES, Postmark, …). Mail is sent to the recipient email. For two-way — reply to an alert with `approve SW-142` / `reject SW-142` or `status` — also add your IMAP host below; Shipwright polls the mailbox (no public URL needed) and only acts on replies from the allowed senders.",
     href: "https://support.google.com/mail/answer/185833",
     label: "Gmail App Password guide",
+  },
+  whatsapp_agent: {
+    note: "The newest WhatsApp channel — no Twilio, no Cloud-API app, no public URL. In WhatsApp → Settings → Agents → Create an agent, then open the agent's chat → Chat info → API key, and paste it below. Enable this channel and Shipwright long-polls for messages automatically. Two-way control from a normal chat: `start <brief>` (confirm), answer the AI's questions, `approve M-142` / `status`. ⚠ Not end-to-end encrypted — messages carry the minimum (mission key + the ask). Rotate any key you've shared elsewhere.",
+    href: "https://faq.whatsapp.com/",
+    label: "WhatsApp Agents",
   },
   whatsapp_twilio: {
     note: "Create a Twilio account, enable the WhatsApp sandbox (or a real sender), and paste the credentials below. Sent to the recipient number. For two-way — reply `status` for updates or `approve M-142` / `reject M-142` to resolve a gate — point Messaging's inbound webhook at /api/v1/integrations/whatsapp/twilio (verified with your Auth token).",
@@ -77,6 +83,9 @@ const CHANNEL_FIELDS: Record<string, { key: string; label: string; secret?: bool
     { key: "imapPassword", label: "IMAP password (blank = same as SMTP)", secret: true },
     { key: "emailAllowedSenders", label: "Allowed reply senders (blank = recipient)", placeholder: "you@gmail.com, teammate@co.com" },
   ],
+  whatsapp_agent: [
+    { key: "whatsappAgentKey", label: "Agent API key", secret: true, placeholder: "paste from WhatsApp → agent chat → Chat info → API key" },
+  ],
   whatsapp_twilio: [
     { key: "twilioAccountSid", label: "Account SID", placeholder: "AC…" },
     { key: "twilioAuthToken", label: "Auth token", secret: true },
@@ -101,7 +110,7 @@ const CHANNEL_FIELDS: Record<string, { key: string; label: string; secret?: bool
 /** A small icon per channel — the real Slack logo, emoji for the rest. */
 function channelIcon(key: string): ReactNode {
   if (key === "slack") return <BrandIcon kind="slack" name="Slack" size={15} />;
-  const emoji: Record<string, string> = { email: "✉️", whatsapp_twilio: "💬", whatsapp_meta: "💬" };
+  const emoji: Record<string, string> = { email: "✉️", whatsapp_agent: "💬", whatsapp_twilio: "💬", whatsapp_meta: "💬" };
   return <span aria-hidden style={{ fontSize: 14 }}>{emoji[key] ?? "🔔"}</span>;
 }
 
@@ -114,6 +123,7 @@ function channelConfigured(key: string, d: AutonomyPolicy): boolean {
   if (key === "whatsapp_twilio")
     return has("twilioAccountSid") && has("twilioAuthToken") && has("twilioWhatsappFrom") && Boolean(d.notifyWhatsapp);
   if (key === "whatsapp_meta") return has("whatsappToken") && has("whatsappPhoneId") && Boolean(d.notifyWhatsapp);
+  if (key === "whatsapp_agent") return has("whatsappAgentKey");   // no recipient needed — replies to inbound
   if (key === "slack") return has("slackWebhook");
   return false;
 }
