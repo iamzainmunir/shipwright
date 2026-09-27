@@ -66,6 +66,27 @@ def test_start_captures_brief() -> None:
     assert intent.args["brief"] == "build a todo app"
 
 
+def test_tier1_read_commands() -> None:
+    # plural / library views
+    assert parse_intent("teams", _session()).kind == "teams"
+    assert parse_intent("agents", _session()).kind == "agents"
+    assert parse_intent("skills", _session()).kind == "skills"
+    assert parse_intent("models", _session()).kind == "models"
+    # "list <thing>"
+    assert parse_intent("list teams", _session()).kind == "teams"
+    assert parse_intent("list agents", _session()).kind == "agents"
+    # "<thing> <name>" → detail with the name captured
+    ti = parse_intent("team Core", _session())
+    assert ti.kind == "team" and ti.args["name"] == "Core"
+    ai = parse_intent("agent Ada Lovelace", _session())
+    assert ai.kind == "agent" and ai.args["name"] == "Ada Lovelace"
+    # bare singular → the list view
+    assert parse_intent("team", _session()).kind == "teams"
+    assert parse_intent("agent", _session()).kind == "agents"
+    # slash form works too
+    assert parse_intent("/agents", _session()).kind == "agents"
+
+
 def test_slash_commands_are_accepted() -> None:
     # WhatsApp agents commonly use slash-commands — a leading "/" must not break classification.
     assert parse_intent("/help", _session()).kind == "help"

@@ -283,3 +283,49 @@ async def test_unknown_action_returns_hint() -> None:
 async def test_empty_action_is_safe() -> None:
     reply = await execute({}, store=FakeStore(), engine=FakeEngine(), actor=_ACTOR, workspace_id=_WS)
     assert isinstance(reply, str) and reply
+
+
+# --- Tier 1: read-only org views (against the real seeded InMemoryStore) ---------
+from app.store import DEMO_WS, InMemoryStore  # noqa: E402
+
+
+async def _exec(action):
+    return await execute(action, store=InMemoryStore(), engine=None, actor=_ACTOR, workspace_id=DEMO_WS)
+
+
+async def test_agents_lists_seeded_agents():
+    reply = await _exec({"do": "agents"})
+    assert "Your agents:" in reply and "Nova" in reply
+
+
+async def test_agent_detail_is_case_insensitive_and_shows_role_model_skills():
+    reply = await _exec({"do": "agent", "name": "nova"})
+    assert "Nova" in reply and "Model:" in reply and "Skills:" in reply
+
+
+async def test_agent_detail_unknown_name():
+    reply = await _exec({"do": "agent", "name": "nobody-here"})
+    assert "Couldn't find" in reply
+
+
+async def test_teams_when_none_seeded():
+    reply = await _exec({"do": "teams"})
+    assert "No teams yet" in reply
+
+
+async def test_skills_lists_library():
+    reply = await _exec({"do": "skills"})
+    assert "Skill library" in reply
+
+
+async def test_models_lists_connections():
+    reply = await _exec({"do": "models"})
+    assert "Model connections:" in reply and "anthropic" in reply
+
+
+async def test_read_views_never_raise_on_a_bare_store():
+    class _Bare:  # a store missing the list_* methods → graceful degrade, never raises
+        pass
+    for do in ("teams", "agents", "skills", "models"):
+        r = await execute({"do": do}, store=_Bare(), engine=None, actor=_ACTOR, workspace_id=DEMO_WS)
+        assert isinstance(r, str) and r

@@ -68,6 +68,9 @@ _HELP_WORDS = frozenset({"help", "?", "h", "commands"})
 _CONFIRM_WORDS = frozenset({"confirm", "yes", "y", "yeah", "yep", "ok", "okay", "sure", "lgtm"})
 # Phrases that back out of a staged action or an answering flow.
 _ABORT_PHRASES = frozenset({"abort", "nevermind", "never mind", "cancel that", "cancel that."})
+# "list <thing>" → the read-only view for that thing (Tier 1).
+_LIST_TARGETS = {"teams": "teams", "agents": "agents", "skills": "skills",
+                 "models": "models", "missions": "missions"}
 
 _HELP_TEXT = (
     f"{BRAND_NAME} on WhatsApp — what I understand:\n"
@@ -78,6 +81,9 @@ _HELP_TEXT = (
     "• missions — list your missions\n"
     "• mission <KEY> — details on one\n"
     "• approve <KEY> / reject <KEY> — decide an open gate\n"
+    "• teams · team <name> — your teams / one team's members\n"
+    "• agents · agent <name> — your agents / one agent's role, skills, model\n"
+    "• skills · models — the skill library / model connections\n"
     "• (when I ask questions) just reply with your answer\n"
     "Reply 'confirm' or 'abort' whenever I ask you to confirm."
 )
@@ -160,6 +166,22 @@ def parse_intent(text: str, session: WaSessionState) -> Intent:
         return Intent("approve", {"mission_key": extract_key(raw)})
     if first in _REJECT_WORDS:
         return Intent("reject", {"mission_key": extract_key(raw)})
+    # Read-only org views (Tier 1): teams / agents / skills / models, and "<thing> <name>" details.
+    rest = raw.split(None, 1)[1].strip() if len(parts) > 1 else ""
+    if first == "list" and len(parts) > 1 and parts[1] in _LIST_TARGETS:
+        return Intent(_LIST_TARGETS[parts[1]])
+    if first == "teams":
+        return Intent("teams")
+    if first == "agents":
+        return Intent("agents")
+    if first == "skills":
+        return Intent("skills")
+    if first in {"models", "model"}:
+        return Intent("models")
+    if first == "team":
+        return Intent("team", {"name": rest}) if rest else Intent("teams")
+    if first == "agent":
+        return Intent("agent", {"name": rest}) if rest else Intent("agents")
     if first == "status" or "status" in parts:
         return Intent("status")
     if first in {"missions", "list"}:
@@ -263,6 +285,20 @@ def advance(session: WaSessionState, intent: Intent) -> tuple[str, dict | None]:
 
     if kind == "mission":
         return "Checking…", {"do": "mission", "mission_key": args.get("mission_key")}
+
+    # Read-only org views (Tier 1) — the executor produces the real reply.
+    if kind == "teams":
+        return "Checking…", {"do": "teams"}
+    if kind == "agents":
+        return "Checking…", {"do": "agents"}
+    if kind == "skills":
+        return "Checking…", {"do": "skills"}
+    if kind == "models":
+        return "Checking…", {"do": "models"}
+    if kind == "team":
+        return "Checking…", {"do": "team", "name": args.get("name", "")}
+    if kind == "agent":
+        return "Checking…", {"do": "agent", "name": args.get("name", "")}
 
     # Unknown → nudge with usage rather than guessing at an action.
     return "Sorry, I didn't catch that.\n\n" + _HELP_TEXT, None

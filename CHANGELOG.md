@@ -40,6 +40,9 @@ make it fire (**P3, part 1**) — all additive/low-risk. The verification-gate s
   (`handle_stateful`), self-throttles sends (≤12/min) with 429/503 backoff, replies only to `user:<id>`,
   and truncates to 4096 chars. **Inert until the key is configured** (Rule 0); the key is a redacted secret.
   Privacy caveat surfaced: this channel is **not end-to-end encrypted**.
+- **WhatsApp org views (P4 Tier 1).** Read your whole org from WhatsApp: `teams` · `team <name>` ·
+  `agents` · `agent <name>` (role, model, skills) · `skills` · `models` (also `list <thing>`, and
+  slash-forms like `/agents`). Read-only and failure-isolated.
 - **WhatsApp conversational control plane (P4).** You can now drive missions from WhatsApp free text —
   **start** a mission, **cancel/end** it, **answer the AI's clarifying questions**, **approve/reject**
   gates, and query **status** — with a per-sender **session state machine** (`wa_sessions`, TTL-bounded,

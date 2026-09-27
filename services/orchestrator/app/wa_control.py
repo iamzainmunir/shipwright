@@ -50,6 +50,18 @@ async def execute(
             return await _do_missions(store=store, workspace_id=workspace_id)
         if do == "mission":
             return await _do_mission(action, store=store)
+        if do == "teams":
+            return await _do_teams(store=store, workspace_id=workspace_id)
+        if do == "team":
+            return await _do_team(action, store=store, workspace_id=workspace_id)
+        if do == "agents":
+            return await _do_agents(store=store, workspace_id=workspace_id)
+        if do == "agent":
+            return await _do_agent(action, store=store, workspace_id=workspace_id)
+        if do == "skills":
+            return await _do_skills(store=store, workspace_id=workspace_id)
+        if do == "models":
+            return await _do_models(store=store, workspace_id=workspace_id)
         return "Not sure what to do with that. Send 'help' for options."
     except Exception:  # noqa: BLE001 — failure isolation: a control action must never crash the caller.
         return _GENERIC_ERROR
@@ -182,6 +194,110 @@ async def _do_mission(action: dict, *, store: Any) -> str:
     return f"{label} — {_stage_of(mission)}{tail}{(' — ' + title) if title else ''}"
 
 
+# --- read-only org views (Tier 1) -----------------------------------------------
+
+
+async def _do_teams(*, store: Any, workspace_id: str) -> str:
+    teams = await _safe_list(store, "list_teams", workspace_id)
+    if teams is None:
+        return "Can't list teams right now."
+    if not teams:
+        return "No teams yet — create one from the dashboard."
+    lines = [f"• {getattr(t, 'name', '?')} ({len(getattr(t, 'members', []) or [])} member(s))"
+             for t in teams[:15]]
+    return "Your teams:\n" + "\n".join(lines)
+
+
+async def _do_team(action: dict, *, store: Any, workspace_id: str) -> str:
+    name = (action.get("name") or "").strip()
+    if not name:
+        return "Which team? Send e.g. 'team Core'."
+    teams = await _safe_list(store, "list_teams", workspace_id)
+    if teams is None:
+        return "Can't look that up right now."
+    team = _find_by_name(teams, name)
+    if team is None:
+        return f"Couldn't find a team called '{name}'. Send 'teams' to list them."
+    agents = await _safe_list(store, "list_agents", workspace_id) or []
+    by_id = {getattr(a, "id", None): a for a in agents}
+    members = getattr(team, "members", []) or []
+    header = f"{getattr(team, 'name', name)}"
+    desc = (getattr(team, "description", "") or "").strip()
+    lines = [header + (f" — {desc}" if desc else "")]
+    if members:
+        lines.append("Members:")
+        for m in members[:20]:
+            a = by_id.get(m.get("agentId") if isinstance(m, dict) else None)
+            who = getattr(a, "name", None) or (m.get("agentId") if isinstance(m, dict) else "?")
+            role = _role_of(a) if a is not None else ""
+            acc = " · accountable" if isinstance(m, dict) and m.get("accountable") else ""
+            lines.append(f"• {who}{f' ({role})' if role else ''}{acc}")
+    else:
+        lines.append("(no members yet)")
+    return "\n".join(lines)
+
+
+async def _do_agents(*, store: Any, workspace_id: str) -> str:
+    agents = await _safe_list(store, "list_agents", workspace_id)
+    if agents is None:
+        return "Can't list agents right now."
+    if not agents:
+        return "No agents yet — add some from the dashboard."
+    lines = [f"• {getattr(a, 'name', '?')} ({_role_of(a)}) · {_status_of(a)}" for a in agents[:20]]
+    return "Your agents:\n" + "\n".join(lines)
+
+
+async def _do_agent(action: dict, *, store: Any, workspace_id: str) -> str:
+    name = (action.get("name") or "").strip()
+    if not name:
+        return "Which agent? Send e.g. 'agent Ada'."
+    agents = await _safe_list(store, "list_agents", workspace_id)
+    if agents is None:
+        return "Can't look that up right now."
+    agent = _find_by_name(agents, name)
+    if agent is None:
+        return f"Couldn't find an agent called '{name}'. Send 'agents' to list them."
+    models = getattr(agent, "models", []) or []
+    model = ", ".join(models) if models else (getattr(agent, "model_binding", "") or "—")
+    skills = getattr(agent, "skills", []) or []
+    skills_txt = ", ".join(skills[:12]) if skills else "—"
+    return (f"{getattr(agent, 'name', name)} — {_role_of(agent)} · {_status_of(agent)}\n"
+            f"Model: {model}\nSkills: {skills_txt}")
+
+
+async def _do_skills(*, store: Any, workspace_id: str) -> str:
+    skills = await _safe_list(store, "list_skills", workspace_id)
+    if skills is None:
+        return "Can't list skills right now."
+    if not skills:
+        return "No skills yet."
+    lines = []
+    for s in skills[:15]:
+        cat = getattr(getattr(s, "category", None), "value", None) or getattr(s, "category", "")
+        succ, fail = int(getattr(s, "successes", 0) or 0), int(getattr(s, "fails", 0) or 0)
+        eff = f" · {round(100 * succ / (succ + fail))}% eff" if (succ + fail) else ""
+        lines.append(f"• {getattr(s, 'name', '?')} ({cat}){eff}")
+    more = "" if len(skills) <= 15 else f"\n…and {len(skills) - 15} more."
+    return f"Skill library ({len(skills)}):\n" + "\n".join(lines) + more
+
+
+async def _do_models(*, store: Any, workspace_id: str) -> str:
+    conns = await _safe_list(store, "list_model_connections", workspace_id)
+    if conns is None:
+        return "Can't list models right now."
+    if not conns:
+        return "No model connections yet — add one under Models."
+    lines = []
+    for c in conns[:15]:
+        prov = getattr(getattr(c, "provider", None), "value", None) or getattr(c, "provider", "?")
+        models = getattr(c, "models", []) or []
+        mtxt = f" ({', '.join(models[:3])})" if models else ""
+        status = getattr(getattr(c, "status", None), "value", None) or getattr(c, "status", "")
+        primary = " · primary" if getattr(c, "is_primary", False) else ""
+        lines.append(f"• {prov}{mtxt} · {status}{primary}")
+    return "Model connections:\n" + "\n".join(lines)
+
+
 # --- small duck-typed helpers ---------------------------------------------------
 
 
@@ -213,3 +329,34 @@ async def _safe_list_missions(store: Any, workspace_id: str) -> list[Any] | None
     if lister is None:
         return None
     return list(await lister(workspace_id))
+
+
+async def _safe_list(store: Any, method: str, workspace_id: str) -> list[Any] | None:
+    """Call a workspace-scoped list method by name, or None when the store doesn't support it."""
+    lister = getattr(store, method, None)
+    if lister is None:
+        return None
+    return list(await lister(workspace_id))
+
+
+def _find_by_name(items: list[Any], name: str) -> Any | None:
+    """Case-insensitive match on ``.name`` (exact first, then a substring), or None."""
+    want = name.strip().lower()
+    for it in items:
+        if (getattr(it, "name", "") or "").strip().lower() == want:
+            return it
+    for it in items:
+        if want in (getattr(it, "name", "") or "").strip().lower():
+            return it
+    return None
+
+
+def _role_of(agent: Any) -> str:
+    role = getattr(agent, "role_key", None) or getattr(agent, "role", None) or ""
+    role = getattr(role, "value", None) or str(role)
+    return role.replace("_", " ").title() if role else "—"
+
+
+def _status_of(agent: Any) -> str:
+    status = getattr(agent, "status", None)
+    return getattr(status, "value", None) or str(status) if status is not None else "—"
