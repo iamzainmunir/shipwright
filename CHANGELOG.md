@@ -22,11 +22,16 @@ make it fire (**P3, part 1**) — all additive/low-risk. The verification-gate s
   - auto-grown skills are **grounded in the real deliverable + the rework the run went through**, and
     carry a populated **category / trigger / instructions** (a usable procedure), not a bare slogan
     (A12/A13).
-- **Learning is now visible (P7, backend).** The engine emits compact learning events so a UI (and the
-  run event stream) can show what knowledge is actually in play, live: `skill.recalled` (with each skill's
-  effectiveness + uses), `memory.recalled`, `recall.empty` (so silent non-use is visible — surfaces A8),
-  `lesson.written` (from a rework), and `skill.learned` (a newly distilled skill). `GET /skills` now
-  returns effectiveness (`successes`/`fails`/`uses`); the web panels consume all of this.
+- **Learning transparency (P7).** It's now visible what knowledge the org is actually using — live and in
+  the dedicated pages:
+  - the engine emits compact events — `skill.recalled` (with effectiveness + uses), `memory.recalled`,
+    `recall.empty` (so silent non-use is visible — surfaces A8), `lesson.written`, `skill.learned`.
+  - **Live Build** renders them inline (🧠 recalled skill / 📚 recalled memory / 📝 lesson / ✨ learned) plus
+    a collapsible **Learning panel** per run; the mission view gains **Research** and **Spec Contract** tabs
+    (cited sources + UI/API items with the feedback ledger).
+  - **Skills** shows per-skill **effectiveness** + uses + source (and a "retired" hint for auto-demoted
+    learned skills); **Memory** groups by kind (lesson / failure / reference / …) with an embedder-status
+    indicator. `GET /skills` returns `successes`/`fails`/`uses`.
 - **WhatsApp Agent Platform channel (P5).** A **no-tunnel** transport for the P4 control plane: create a
   "Shipwright" agent inside WhatsApp (Settings → Agents), paste its API key into `notify_config`, and drive
   your org from a normal WhatsApp chat — **no Twilio, no Cloud-API app, no public URL**. Receive is a
@@ -123,7 +128,7 @@ make it fire (**P3, part 1**) — all additive/low-risk. The verification-gate s
   one-line description, so a recalled skill can actually change how the agent works. (audit A5/A6)
 
 ### Planned (tracked, next)
-- P7 learning transparency UI (web panels — in progress).
+- End-to-end live verification pass on Claude CLI (Opus 4.8, high) across all features.
 
 ## [2026-09] — on `master`
 

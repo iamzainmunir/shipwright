@@ -407,11 +407,18 @@ export interface Skill {
   autoInvoke: boolean;
   installed: boolean;
   uses: number;
+  /** Real outcome tallies (A14 skill effectiveness). Effectiveness = successes/(successes+fails). */
+  successes?: number;
+  fails?: number;
+  /** When the agent should reach for it, and the step-by-step guidance it follows (may be absent). */
+  trigger?: string | null;
+  instructions?: string | null;
 }
 
 export interface MemoryItem {
   id: string;
-  type: "project" | "feedback" | "reference" | "user";
+  /** `lesson`/`failure` are the P7 learning kinds written back by runs (a lesson learned, a failure to avoid). */
+  type: "project" | "feedback" | "reference" | "user" | "lesson" | "failure";
   title: string;
   body: string;
   links: string[];
@@ -470,6 +477,82 @@ export const createMemory = (body: MemoryInput) => api.post<MemoryItem>(`${V1}/m
 export const updateMemory = (id: string, patch: Partial<MemoryInput>) =>
   api.patch<MemoryItem>(`${V1}/memory/${id}`, patch);
 export const deleteMemory = (id: string) => api.del<void>(`${V1}/memory/${id}`);
+
+// ---- learning transparency: research briefs + spec contracts (P6 researcher, P1 contract) ----
+
+/** One cited claim in a research brief — the claim, where it came from, and how sure the agent is. */
+export interface ResearchFinding {
+  claim: string;
+  sourceUrl: string;
+  /** May be a 0–1 score or a label ("high"/"medium"/"low") depending on the source. */
+  confidence: number | string;
+}
+
+/** A cited research brief the researcher produced for a mission (P6). */
+export interface ResearchBrief {
+  id: string;
+  missionId: string;
+  question: string;
+  findings: ResearchFinding[];
+  recommendations: string[];
+  sources: string[];
+  createdAt: string;
+}
+
+export type ContractItemKind = "ui" | "api";
+export type ContractSeverity = "blocking" | "non_blocking";
+
+/** One acceptance criterion in a mission's Spec Contract — UI (route + expectations) or API (method + path). */
+export interface ContractItem {
+  id: string;
+  kind: ContractItemKind;
+  criterion: string;
+  severity: ContractSeverity;
+  // UI-shaped expectations
+  route?: string | null;
+  expectText?: string[] | null;
+  expectSelector?: string[] | null;
+  // API-shaped expectations
+  method?: string | null;
+  path?: string | null;
+  request?: Record<string, unknown> | null;
+  response?: Record<string, unknown> | null;
+  errors?: Record<string, unknown> | null;
+}
+
+/** The mission's Spec Contract (P1) — the versioned set of criteria the build is graded against. */
+export interface Contract {
+  id: string;
+  missionId: string;
+  version: number;
+  items: ContractItem[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** A ledger entry recording expected-vs-actual for one contract item during a run's QA/review. */
+export interface ContractFeedback {
+  id: string;
+  contractId: string;
+  itemId: string;
+  runId?: string | null;
+  phase: string;
+  expected: string;
+  actual: string;
+  severity: string;
+  feedback: string;
+  createdAt: string;
+}
+
+/** The cited research brief(s) for a mission (empty array when the researcher hasn't run). */
+export const getMissionResearch = (key: string) =>
+  api.get<ResearchBrief[]>(`${V1}/missions/${key}/research`);
+/** The mission's current Spec Contract, or null when none has been locked yet. */
+export const getMissionContract = (key: string) =>
+  api.get<Contract | null>(`${V1}/missions/${key}/contract`);
+/** The feedback ledger (expected vs actual per item) recorded against the mission's contract. */
+export const getMissionContractFeedback = (key: string) =>
+  api.get<ContractFeedback[]>(`${V1}/missions/${key}/contract/feedback`);
 
 // ---- integrations (3rd-party apps: Jira, GitHub, Chrome for QA, …) ----
 
@@ -667,8 +750,8 @@ export const GUARDRAIL_COPY: { key: string; label: string; hint: string }[] = [
   { key: "requireTests", label: "Require passing tests", hint: "A run cannot ship unless tests pass." },
 ];
 
-export const MEMORY_TONE: Record<string, "brand" | "amber" | "cyan" | "green"> = {
-  project: "brand", feedback: "amber", reference: "cyan", user: "green",
+export const MEMORY_TONE: Record<string, "brand" | "amber" | "cyan" | "green" | "blue" | "red"> = {
+  project: "brand", feedback: "amber", reference: "cyan", user: "green", lesson: "blue", failure: "red",
 };
 
 export const STATUS_TONE: Record<string, "green" | "blue" | "neutral" | "red"> = {

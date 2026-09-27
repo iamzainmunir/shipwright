@@ -30,9 +30,11 @@ const TYPE_META: Record<MemType, TypeMeta> = {
   feedback: { label: "Feedback", tint: "tint-amber", icon: "pen", color: "var(--amber)", blurb: "Corrections learned from past reviews." },
   reference: { label: "Reference", tint: "tint-cyan", icon: "external", color: "var(--cyan)", blurb: "Pointers to repos, docs & sources." },
   user: { label: "User", tint: "tint-green", icon: "users", color: "var(--green)", blurb: "Owner preferences & standing choices." },
+  lesson: { label: "Lesson", tint: "tint-blue", icon: "star", color: "var(--blue)", blurb: "Lessons the org learned and now applies." },
+  failure: { label: "Failure", tint: "tint-red", icon: "bug", color: "var(--red)", blurb: "Failure modes to recognise and avoid." },
 };
 
-const TYPE_ORDER: MemType[] = ["project", "feedback", "reference", "user"];
+const TYPE_ORDER: MemType[] = ["project", "feedback", "reference", "user", "lesson", "failure"];
 
 const metaFor = (type: MemType): TypeMeta => TYPE_META[type] ?? TYPE_META.project;
 
@@ -350,7 +352,7 @@ export default function MemoryPage() {
   }, [notice]);
 
   const counts = useMemo(() => {
-    const base: Record<MemType, number> = { project: 0, feedback: 0, reference: 0, user: 0 };
+    const base: Record<MemType, number> = { project: 0, feedback: 0, reference: 0, user: 0, lesson: 0, failure: 0 };
     for (const item of items ?? []) base[item.type] += 1;
     return base;
   }, [items]);
@@ -497,6 +499,20 @@ export default function MemoryPage() {
             </div>
           </div>
 
+          {/* Recall-mode hint: no embedding model is configured by default, so semantic recall falls
+              back to lexical (keyword) matching. Purely informative — surfaces how retrieval works. */}
+          <div
+            className="mem-recall"
+            data-tip="With no embedding model connected, recall matches keywords over titles & bodies rather than meaning."
+          >
+            <span className="mr-dot" />
+            <Icon name="brain" size={13} />
+            <span>
+              Semantic recall: <b>offline lexical</b>
+            </span>
+            <span className="faint">— keyword matching until an embedder is connected</span>
+          </div>
+
           <div className="mem-grid">
             {filtered.length === 0 ? (
               <div className="empty">
@@ -538,6 +554,15 @@ const STYLES = `
 
 .mem-notice{ display:inline-flex; align-items:center; gap:8px; margin-bottom:16px; padding:9px 13px; border-radius:11px;
   font-size:12.5px; font-weight:600; color:var(--green); background:rgba(58,210,159,.13); border:1px solid rgba(58,210,159,.3); }
+
+/* Recall-mode hint — a quiet, informative strip (not an alert). */
+.mem-recall{ display:inline-flex; align-items:center; gap:8px; margin-bottom:18px; padding:7px 12px; border-radius:10px;
+  font-size:12px; color:var(--muted); background:var(--panel-2); border:1px solid var(--line); position:relative; }
+.mem-recall b{ color:var(--text); font-weight:700; }
+.mem-recall .faint{ font-size:11.5px; }
+.mem-recall .mr-dot{ width:7px; height:7px; border-radius:50%; background:var(--amber);
+  box-shadow:0 0 0 3px color-mix(in srgb, var(--amber) 22%, transparent); flex:0 0 7px; }
+@media(max-width:560px){ .mem-recall .faint{ display:none; } }
 
 .mem-grid{ display:grid; gap:16px; grid-template-columns:repeat(auto-fill, minmax(min(100%, 290px), 1fr)); }
 .mem-grid .empty{ grid-column:1/-1; }

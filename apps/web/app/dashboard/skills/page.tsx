@@ -30,14 +30,32 @@ const SOURCE_TINT: Record<string, string> = {
   "built-in": "tint-cyan",
   custom: "tint-brand",
   marketplace: "tint-blue",
+  learned: "tint-green",
 };
 const SOURCE_TONE: Record<string, BadgeTone> = {
   "built-in": "cyan",
   custom: "brand",
   marketplace: "blue",
+  learned: "green",
 };
 const sourceTint = (source: string): string => SOURCE_TINT[source] ?? "tint-brand";
 const sourceTone = (source: string): BadgeTone => SOURCE_TONE[source] ?? "brand";
+
+/**
+ * Effectiveness = successes / (successes + fails), as a whole percent — or null when there's no
+ * signal yet (never invoked, or no recorded outcomes), so the UI can show "—" instead of a fake 0%.
+ */
+function effectivenessPct(skill: Skill): number | null {
+  const wins = skill.successes ?? 0;
+  const losses = skill.fails ?? 0;
+  const total = wins + losses;
+  return total === 0 ? null : Math.round((wins / total) * 100);
+}
+/** Color the effectiveness meter by band: strong (green) · mixed (amber) · weak (red). */
+const effColor = (pct: number): string =>
+  pct >= 66 ? "var(--green)" : pct >= 33 ? "var(--amber)" : "var(--red)";
+/** A learned skill turned off (autoInvoke=false) has been auto-demoted — surface a subtle hint. */
+const isRetired = (skill: Skill): boolean => skill.source === "learned" && !skill.autoInvoke;
 
 type Tab = "installed" | "marketplace";
 
@@ -114,7 +132,36 @@ function SkillFooter({ skill, onToggleAuto }: SkillCardProps) {
   );
 }
 
+/** Outcome signal: the effectiveness meter (successes ÷ recorded outcomes), or "—" when no data yet. */
+function SkillMeter({ skill }: { skill: Skill }) {
+  const pct = effectivenessPct(skill);
+  const outcomes = (skill.successes ?? 0) + (skill.fails ?? 0);
+  return (
+    <div
+      className="row between"
+      style={{ gap: 10, fontSize: 12 }}
+      title={pct === null ? "No recorded outcomes yet" : `${skill.successes ?? 0} of ${outcomes} outcomes succeeded`}
+    >
+      <span className="faint">Effectiveness</span>
+      {pct === null ? (
+        <span className="faint mono">—</span>
+      ) : (
+        <span className="row gap-8">
+          <span
+            aria-hidden
+            style={{ display: "inline-block", width: 60, height: 6, borderRadius: 999, background: "var(--line)", overflow: "hidden" }}
+          >
+            <span style={{ display: "block", height: "100%", width: `${pct}%`, background: effColor(pct), borderRadius: 999 }} />
+          </span>
+          <span className="mono fw-7" style={{ color: effColor(pct), minWidth: 34, textAlign: "right" }}>{pct}%</span>
+        </span>
+      )}
+    </div>
+  );
+}
+
 function SkillCard({ skill, onToggleAuto }: SkillCardProps) {
+  const retired = isRetired(skill);
   return (
     <div className="card hover" style={CARD_ITEM}>
       <div className="row wrap" style={{ alignItems: "flex-start", gap: 12 }}>
@@ -127,6 +174,11 @@ function SkillCard({ skill, onToggleAuto }: SkillCardProps) {
               {skill.name}
             </span>
             <Badge tone={sourceTone(skill.source)}>{skill.source}</Badge>
+            {retired && (
+              <span className="chip" title="Auto-demoted after weak results — no longer auto-invoked" style={{ opacity: 0.75 }}>
+                <Icon name="moon" size={11} /> retired
+              </span>
+            )}
           </div>
           <div style={{ marginTop: 8 }}>
             <span className="chip">
@@ -138,6 +190,7 @@ function SkillCard({ skill, onToggleAuto }: SkillCardProps) {
       <p className="muted" style={CARD_DESC}>
         {skill.description}
       </p>
+      <SkillMeter skill={skill} />
       <SkillFooter skill={skill} onToggleAuto={onToggleAuto} />
     </div>
   );

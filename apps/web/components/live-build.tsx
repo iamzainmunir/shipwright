@@ -22,10 +22,14 @@ import {
   PRIORITY_LABEL,
   type Agent,
   type ClarifyAnswer,
+  type Contract,
+  type ContractFeedback,
+  type ContractItem,
   type EventItem,
   type Mission,
   type MissionStage,
   type Priority,
+  type ResearchBrief,
   type Run,
   type GithubRepo,
   type Step,
@@ -35,6 +39,9 @@ import {
   type PreviewStatus,
   cancelRun,
   decideGate,
+  getMissionContract,
+  getMissionContractFeedback,
+  getMissionResearch,
   getPreview,
   startPreview,
   stopPreview,
@@ -171,13 +178,18 @@ const AVATAR_PALETTE = [
   "var(--pink)",
 ];
 
-const TABS = [
+type TabKey = "pipeline" | "spec" | "contract" | "research" | "diff" | "qa";
+interface TabDef {
+  key: TabKey;
+  label: string;
+}
+/** Always-present tabs; Contract + Research are inserted only when the mission actually has that data. */
+const BASE_TABS: TabDef[] = [
   { key: "pipeline", label: "Pipeline" },
   { key: "spec", label: "Spec & checks" },
   { key: "diff", label: "Code" },
   { key: "qa", label: "QA" },
-] as const;
-type TabKey = (typeof TABS)[number]["key"];
+];
 
 /* ============================================================
    Small pure helpers
@@ -280,6 +292,214 @@ function autonomyLabel(autonomy: string): string {
 function isTerminal(status: string | undefined): boolean {
   return status === "succeeded" || status === "failed" || status === "cancelled";
 }
+
+/* ============================================================
+   Learning transparency (skills/memory recall, lessons, research, contract)
+   ============================================================ */
+
+/** Tone → CSS color token, for tinting learning/route log lines. */
+const TONE_COLOR: Record<BadgeTone, string> = {
+  neutral: "var(--muted)",
+  brand: "var(--brand)",
+  green: "var(--green)",
+  amber: "var(--amber)",
+  red: "var(--red)",
+  cyan: "var(--cyan)",
+  blue: "var(--blue)",
+  pink: "var(--pink)",
+};
+
+/**
+ * Learning events arrive on the normal run stream as `type:"status"` events carrying a `payload.kind`.
+ * We give each kind an emoji + tone + short label so a human sees, inline in the console, exactly what
+ * the org recalled / learned at each step (P7 learning events).
+ */
+const LEARNING_CHIP: Record<string, { emoji: string; tone: BadgeTone; label: string }> = {
+  "skill.recalled": { emoji: "🧠", tone: "brand", label: "skills recalled" },
+  "memory.recalled": { emoji: "📚", tone: "cyan", label: "memory recalled" },
+  "recall.empty": { emoji: "💭", tone: "neutral", label: "nothing recalled" },
+  "lesson.written": { emoji: "📝", tone: "blue", label: "lesson written" },
+  "skill.learned": { emoji: "✨", tone: "green", label: "skill learned" },
+  "research.brief": { emoji: "🔎", tone: "cyan", label: "research brief" },
+  "contract.ready": { emoji: "📋", tone: "amber", label: "contract ready" },
+};
+
+interface RecalledSkill {
+  id?: string;
+  name: string;
+  effectiveness?: number | null;
+  uses?: number;
+}
+interface RecalledMemory {
+  id?: string;
+  title: string;
+  type?: string;
+}
+
+function asRecalledSkills(v: unknown): RecalledSkill[] {
+  return Array.isArray(v)
+    ? v.filter((x): x is RecalledSkill => !!x && typeof (x as RecalledSkill).name === "string")
+    : [];
+}
+function asRecalledMemories(v: unknown): RecalledMemory[] {
+  return Array.isArray(v)
+    ? v.filter((x): x is RecalledMemory => !!x && typeof (x as RecalledMemory).title === "string")
+    : [];
+}
+function asStringArray(v: unknown): string[] {
+  return Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : [];
+}
+/** Format an effectiveness that may be a 0–1 fraction or a 0–100 percent as "NN%" (null → no signal). */
+function formatEff(v: unknown): string | null {
+  if (typeof v !== "number" || Number.isNaN(v)) return null;
+  const pct = v <= 1 ? Math.round(v * 100) : Math.round(v);
+  return `${pct}%`;
+}
+
+/** A clean one-line summary of a learning event, derived from its payload (null → not a learning event). */
+function learningSummary(e: EventItem): string | null {
+  const p = e.payload as Record<string, unknown> | undefined;
+  const kind = String(p?.kind ?? "");
+  switch (kind) {
+    case "skill.recalled": {
+      const skills = asRecalledSkills(p?.skills);
+      if (skills.length === 0) return "Recalled relevant skills";
+      const shown = skills.slice(0, 4).map((s) => {
+        const eff = formatEff(s.effectiveness);
+        return eff ? `${s.name} (${eff})` : s.name;
+      });
+      const extra = skills.length > shown.length ? ` +${skills.length - shown.length}` : "";
+      return `Recalled ${skills.length} ${skills.length === 1 ? "skill" : "skills"}: ${shown.join(", ")}${extra}`;
+    }
+    case "memory.recalled": {
+      const mems = asRecalledMemories(p?.memories);
+      if (mems.length === 0) return "Recalled relevant memory";
+      const shown = mems.slice(0, 4).map((m) => m.title);
+      const extra = mems.length > shown.length ? ` +${mems.length - shown.length}` : "";
+      return `Recalled ${mems.length} ${mems.length === 1 ? "memory" : "memories"}: ${shown.join(", ")}${extra}`;
+    }
+    case "recall.empty":
+      return "Nothing relevant recalled for this step";
+    case "lesson.written":
+      return `Wrote a lesson${p?.phase ? ` from ${phaseLabel(String(p.phase))}` : ""}`;
+    case "skill.learned":
+      return `Learned a new skill: ${String(p?.name ?? "unnamed")}${p?.category ? ` (${String(p.category)})` : ""}`;
+    case "research.brief": {
+      const findings = Number(p?.findings ?? 0) || 0;
+      const sources = asStringArray(p?.sources);
+      const parts = [`${findings} ${findings === 1 ? "finding" : "findings"}`];
+      if (sources.length) parts.push(`${sources.length} ${sources.length === 1 ? "source" : "sources"}`);
+      return `Cited research brief · ${parts.join(" · ")}`;
+    }
+    case "contract.ready": {
+      const ui = Number(p?.ui ?? 0) || 0;
+      const api = Number(p?.api ?? 0) || 0;
+      const ver = p?.version != null ? ` v${String(p.version)}` : "";
+      return `Spec contract${ver} ready · ${ui} UI · ${api} API`;
+    }
+    default:
+      return null;
+  }
+}
+
+/** What the org recalled / learned across a run — the source for the collapsible Learning panel. */
+interface RunLearning {
+  skills: { name: string; effectiveness: number | null; uses: number }[];
+  memories: { title: string; type?: string }[];
+  learned: { name: string; category?: string }[];
+  lessons: number;
+  lessonPhases: string[];
+  empties: number;
+  hasAny: boolean;
+}
+
+function summarizeLearning(events: EventItem[]): RunLearning {
+  const skills = new Map<string, { name: string; effectiveness: number | null; uses: number }>();
+  const memories = new Map<string, { title: string; type?: string }>();
+  const learned = new Map<string, { name: string; category?: string }>();
+  const lessonPhases: string[] = [];
+  let lessons = 0;
+  let empties = 0;
+  for (const e of events) {
+    const p = e.payload as Record<string, unknown> | undefined;
+    switch (String(p?.kind ?? "")) {
+      case "skill.recalled":
+        for (const s of asRecalledSkills(p?.skills)) {
+          const eff = typeof s.effectiveness === "number" ? s.effectiveness : null;
+          const prev = skills.get(s.name);
+          skills.set(s.name, {
+            name: s.name,
+            effectiveness: eff ?? prev?.effectiveness ?? null,
+            uses: Math.max(prev?.uses ?? 0, typeof s.uses === "number" ? s.uses : 0),
+          });
+        }
+        break;
+      case "memory.recalled":
+        for (const m of asRecalledMemories(p?.memories)) memories.set(m.id ?? m.title, { title: m.title, type: m.type });
+        break;
+      case "recall.empty":
+        empties += 1;
+        break;
+      case "lesson.written":
+        lessons += 1;
+        if (p?.phase) lessonPhases.push(String(p.phase));
+        break;
+      case "skill.learned":
+        if (p?.name) {
+          const name = String(p.name);
+          learned.set(name, { name, category: p?.category ? String(p.category) : undefined });
+        }
+        break;
+      default:
+        break;
+    }
+  }
+  const skillsArr = [...skills.values()];
+  const memArr = [...memories.values()];
+  const learnedArr = [...learned.values()];
+  return {
+    skills: skillsArr,
+    memories: memArr,
+    learned: learnedArr,
+    lessons,
+    lessonPhases,
+    empties,
+    hasAny: skillsArr.length > 0 || memArr.length > 0 || learnedArr.length > 0 || lessons > 0 || empties > 0,
+  };
+}
+
+/** Color band for an effectiveness percent (whole number 0–100). */
+const effToneColor = (pct: number): string =>
+  pct >= 66 ? "var(--green)" : pct >= 33 ? "var(--amber)" : "var(--red)";
+
+const CONF_WORD: Record<string, number> = { high: 90, strong: 90, medium: 60, med: 60, moderate: 60, low: 30, weak: 30 };
+/** A research finding's confidence → display label (percent or the original word). */
+function confidenceLabel(c: number | string): string {
+  if (typeof c === "number") {
+    const pct = c <= 1 ? Math.round(c * 100) : Math.round(c);
+    return `${pct}%`;
+  }
+  return c;
+}
+/** A research finding's confidence → badge tone (high=green, mid=amber, low=neutral). */
+function confidenceTone(c: number | string): BadgeTone {
+  const pct = typeof c === "number" ? (c <= 1 ? c * 100 : c) : (CONF_WORD[c.toLowerCase()] ?? 50);
+  return pct >= 66 ? "green" : pct >= 33 ? "amber" : "neutral";
+}
+
+const CONTRACT_SEV_TONE: Record<string, BadgeTone> = { blocking: "red", non_blocking: "neutral" };
+const contractSevLabel = (s: string): string => (s === "non_blocking" ? "non-blocking" : s);
+
+/** Best-effort pretty label for a source URL (host + path, protocol stripped); non-URLs pass through. */
+function prettyUrl(s: string): string {
+  try {
+    const u = new URL(s);
+    return `${u.host}${u.pathname === "/" ? "" : u.pathname}`;
+  } catch {
+    return s;
+  }
+}
+const isHttpUrl = (s: string): boolean => /^https?:\/\//i.test(s.trim());
 
 /* ---- Pipeline rows (real steps only) ---- */
 
@@ -804,6 +1024,414 @@ function QaTab({ qa }: { qa: QaRow[] }) {
           <Badge tone={QA_TONE[q.status]}>{QA_LABEL[q.status]}</Badge>
         </div>
       ))}
+    </div>
+  );
+}
+
+/** Shared empty-state for the Research/Contract tabs (mirrors the Pipeline/QA empties). */
+function PanelEmpty({ icon, title, hint }: { icon: IconName; title: string; hint: string }) {
+  return (
+    <div className="empty">
+      <div className="em-ic">
+        <Icon name={icon} size={34} />
+      </div>
+      <div className="fw-6">{title}</div>
+      <p className="text-sm muted mt-4" style={{ maxWidth: "42ch", margin: "4px auto 0" }}>
+        {hint}
+      </p>
+    </div>
+  );
+}
+
+/**
+ * Research tab — the cited brief(s) the researcher produced (P6). Findings read as "claim [source]"
+ * with the source opening in a new tab; recommendations + all sources follow.
+ */
+function ResearchPanel({ briefs }: { briefs: ResearchBrief[] }) {
+  if (briefs.length === 0) {
+    return (
+      <PanelEmpty
+        icon="search"
+        title="No research yet"
+        hint="When the researcher investigates this mission, its cited brief lands here."
+      />
+    );
+  }
+  return (
+    <div className="col gap-20">
+      {briefs.map((b) => (
+        <div key={b.id}>
+          <div className="row between wrap gap-8 mb-8">
+            <span className="section-label" style={{ margin: 0 }}>
+              {b.question || "Research brief"}
+            </span>
+            <span className="text-xs faint">{fmtWhen(b.createdAt)}</span>
+          </div>
+
+          {b.findings.length > 0 && (
+            <div className="list">
+              {b.findings.map((f, i) => (
+                <div className="list-item" key={i} style={{ alignItems: "flex-start" }}>
+                  <span className="dot" style={{ background: "var(--cyan)", marginTop: 6 }} />
+                  <div className="li-main">
+                    <div className="text-sm" style={{ lineHeight: 1.55 }}>
+                      {f.claim}{" "}
+                      {isHttpUrl(f.sourceUrl) && (
+                        <a
+                          className="c-brand row gap-4"
+                          href={f.sourceUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          style={{ display: "inline-flex", verticalAlign: "baseline" }}
+                        >
+                          [source] <Icon name="external" size={11} />
+                        </a>
+                      )}
+                    </div>
+                  </div>
+                  {f.confidence !== undefined && f.confidence !== "" && (
+                    <Badge tone={confidenceTone(f.confidence)}>{confidenceLabel(f.confidence)}</Badge>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+
+          {b.recommendations.length > 0 && (
+            <div className="mt-16">
+              <div className="section-label">Recommendations</div>
+              <ul className="col gap-6" style={{ margin: 0, paddingLeft: 18 }}>
+                {b.recommendations.map((r, i) => (
+                  <li key={i} className="text-sm" style={{ lineHeight: 1.5 }}>
+                    {r}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {b.sources.length > 0 && (
+            <div className="mt-16">
+              <div className="section-label">Sources</div>
+              <div className="row wrap gap-6">
+                {b.sources.map((s, i) =>
+                  isHttpUrl(s) ? (
+                    <a
+                      key={i}
+                      className="chip mono text-xs"
+                      href={s}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      style={{ maxWidth: 240, cursor: "pointer" }}
+                      title={s}
+                    >
+                      <Icon name="external" size={11} />
+                      <span className="truncate">{prettyUrl(s)}</span>
+                    </a>
+                  ) : (
+                    <span key={i} className="chip text-xs" style={{ maxWidth: 240 }} title={s}>
+                      <span className="truncate">{s}</span>
+                    </span>
+                  ),
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/** One contract criterion: kind + severity, its route/endpoint + expectations, and any feedback on it. */
+function ContractItemRow({ item, feedback }: { item: ContractItem; feedback: ContractFeedback[] }) {
+  const expectText = item.expectText ?? [];
+  const expectSelector = item.expectSelector ?? [];
+  const hasMeta =
+    (item.kind === "api" && (item.method || item.path)) ||
+    (item.kind === "ui" && item.route) ||
+    expectText.length > 0 ||
+    expectSelector.length > 0;
+  return (
+    <div className="card pad" style={{ padding: "12px 14px" }}>
+      <div className="row between wrap gap-8">
+        <div className="row gap-8" style={{ minWidth: 0 }}>
+          <Badge tone={item.kind === "api" ? "blue" : "cyan"}>{item.kind.toUpperCase()}</Badge>
+          <span className="text-sm fw-6" style={{ minWidth: 0 }}>
+            {item.criterion}
+          </span>
+        </div>
+        <Badge tone={CONTRACT_SEV_TONE[item.severity] ?? "neutral"} dot={item.severity === "blocking"}>
+          {contractSevLabel(item.severity)}
+        </Badge>
+      </div>
+
+      {hasMeta && (
+        <div className="row wrap gap-6 mt-8">
+          {item.kind === "api" && (item.method || item.path) && (
+            <span className="chip mono text-xs" title="Endpoint under contract">
+              {item.method ? `${item.method.toUpperCase()} ` : ""}
+              {item.path ?? ""}
+            </span>
+          )}
+          {item.kind === "ui" && item.route && (
+            <span className="chip mono text-xs" title="Route under contract">
+              <Icon name="external" size={11} /> {item.route}
+            </span>
+          )}
+          {expectText.map((t, i) => (
+            <span key={`t${i}`} className="chip text-xs" title="Expected text">
+              &ldquo;{t}&rdquo;
+            </span>
+          ))}
+          {expectSelector.map((s, i) => (
+            <span key={`s${i}`} className="chip mono text-xs" title="Expected selector">
+              {s}
+            </span>
+          ))}
+        </div>
+      )}
+
+      {feedback.length > 0 && (
+        <div className="mt-12" style={{ borderTop: "1px solid var(--line)", paddingTop: 10 }}>
+          <div className="section-label" style={{ margin: "0 0 8px" }}>
+            Feedback ({feedback.length})
+          </div>
+          <div className="col gap-10">
+            {feedback.map((f) => (
+              <div key={f.id} className="col gap-4">
+                <div className="row gap-6 wrap" style={{ alignItems: "center" }}>
+                  <Badge tone={f.severity === "blocking" ? "red" : "neutral"}>{phaseLabel(f.phase)}</Badge>
+                  <span className="text-xs faint">{fmtWhen(f.createdAt)}</span>
+                </div>
+                <div className="text-xs" style={{ lineHeight: 1.5 }}>
+                  <span className="c-green fw-7">expected</span> {f.expected}
+                </div>
+                <div className="text-xs" style={{ lineHeight: 1.5 }}>
+                  <span className="c-red fw-7">actual</span> {f.actual}
+                </div>
+                {f.feedback && (
+                  <div className="text-xs muted" style={{ lineHeight: 1.5 }}>
+                    {f.feedback}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Contract tab — the mission's Spec Contract (P1) with UI + API criteria grouped, severity badges,
+ * and its feedback ledger (expected vs actual) attached under the item each entry graded.
+ */
+function ContractPanel({ contract, feedback }: { contract: Contract; feedback: ContractFeedback[] }) {
+  const byItem = useMemo(() => {
+    const m = new Map<string, ContractFeedback[]>();
+    for (const f of feedback) {
+      const arr = m.get(f.itemId) ?? [];
+      arr.push(f);
+      m.set(f.itemId, arr);
+    }
+    return m;
+  }, [feedback]);
+
+  const ui = contract.items.filter((i) => i.kind === "ui");
+  const api = contract.items.filter((i) => i.kind === "api");
+  const itemIds = new Set(contract.items.map((i) => i.id));
+  const orphanFeedback = feedback.filter((f) => !itemIds.has(f.itemId));
+
+  return (
+    <div className="col gap-16">
+      <div className="row between wrap gap-8">
+        <Badge tone="brand">
+          <Icon name="doc" size={12} /> Contract v{contract.version}
+        </Badge>
+        <span className="text-xs faint">
+          {ui.length} UI · {api.length} API · updated {fmtWhen(contract.updatedAt)}
+        </span>
+      </div>
+
+      {ui.length > 0 && (
+        <div>
+          <div className="section-label">UI criteria</div>
+          <div className="col gap-8">
+            {ui.map((i) => (
+              <ContractItemRow key={i.id} item={i} feedback={byItem.get(i.id) ?? []} />
+            ))}
+          </div>
+        </div>
+      )}
+
+      {api.length > 0 && (
+        <div>
+          <div className="section-label">API criteria</div>
+          <div className="col gap-8">
+            {api.map((i) => (
+              <ContractItemRow key={i.id} item={i} feedback={byItem.get(i.id) ?? []} />
+            ))}
+          </div>
+        </div>
+      )}
+
+      {contract.items.length === 0 && (
+        <p className="text-sm muted" style={{ marginBottom: 0 }}>
+          The contract has no criteria yet.
+        </p>
+      )}
+
+      {orphanFeedback.length > 0 && (
+        <div>
+          <div className="section-label">Other feedback</div>
+          <div className="col gap-10">
+            {orphanFeedback.map((f) => (
+              <div key={f.id} className="card pad" style={{ padding: "10px 12px" }}>
+                <div className="row gap-6 wrap mb-4" style={{ alignItems: "center" }}>
+                  <Badge tone={f.severity === "blocking" ? "red" : "neutral"}>{phaseLabel(f.phase)}</Badge>
+                  <span className="text-xs faint">{fmtWhen(f.createdAt)}</span>
+                </div>
+                <div className="text-xs" style={{ lineHeight: 1.5 }}>
+                  <span className="c-green fw-7">expected</span> {f.expected}
+                </div>
+                <div className="text-xs" style={{ lineHeight: 1.5 }}>
+                  <span className="c-red fw-7">actual</span> {f.actual}
+                </div>
+                {f.feedback && (
+                  <div className="text-xs muted mt-4" style={{ lineHeight: 1.5 }}>
+                    {f.feedback}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Learning panel — a compact, collapsible summary of what the org recalled and learned during the run
+ * (skills recalled with effectiveness, memory recalled, lessons written, skills learned). Collapsed by
+ * default so it stays unobtrusive; the count chips read at a glance even while closed.
+ */
+function LearningPanel({ data }: { data: RunLearning }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="card pad">
+      <button
+        type="button"
+        className="row between"
+        style={{ width: "100%", background: "none", border: "none", padding: 0, cursor: "pointer", color: "inherit" }}
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+      >
+        <span className="row gap-8">
+          <span aria-hidden style={{ fontSize: 15, lineHeight: 1 }}>
+            🧠
+          </span>
+          <span className="fw-7">Learning</span>
+        </span>
+        <Icon
+          name="chevron"
+          size={14}
+          style={{ transform: open ? "rotate(90deg)" : "none", transition: "transform .15s", color: "var(--faint)" }}
+        />
+      </button>
+
+      <div className="row wrap gap-6 mt-8">
+        <Badge tone="brand">{data.skills.length} recalled</Badge>
+        <Badge tone="cyan">{data.memories.length} memory</Badge>
+        {data.learned.length > 0 && <Badge tone="green">{data.learned.length} learned</Badge>}
+        {data.lessons > 0 && <Badge tone="blue">{data.lessons} lessons</Badge>}
+      </div>
+
+      {open && (
+        <div className="col gap-12 mt-12">
+          <div>
+            <div className="section-label" style={{ margin: "0 0 6px" }}>
+              Skills recalled
+            </div>
+            {data.skills.length === 0 ? (
+              <p className="text-xs faint" style={{ margin: 0 }}>
+                {data.empties > 0 ? `Nothing recalled on ${data.empties} step${data.empties === 1 ? "" : "s"}.` : "None this run."}
+              </p>
+            ) : (
+              <div className="col gap-6">
+                {data.skills.map((s) => {
+                  const eff = formatEff(s.effectiveness);
+                  const pct = s.effectiveness == null ? null : s.effectiveness <= 1 ? Math.round(s.effectiveness * 100) : Math.round(s.effectiveness);
+                  return (
+                    <div className="row between gap-8" key={s.name} style={{ fontSize: 12 }}>
+                      <span className="mono truncate" style={{ minWidth: 0 }}>
+                        {s.name}
+                      </span>
+                      {eff && pct !== null ? (
+                        <span className="mono fw-7" style={{ color: effToneColor(pct), flex: "0 0 auto" }}>
+                          {eff}
+                        </span>
+                      ) : (
+                        <span className="faint mono" style={{ flex: "0 0 auto" }}>
+                          —
+                        </span>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
+          {data.memories.length > 0 && (
+            <div>
+              <div className="section-label" style={{ margin: "0 0 6px" }}>
+                Memory recalled
+              </div>
+              <div className="row wrap gap-6">
+                {data.memories.map((m, i) => (
+                  <span key={i} className="chip text-xs" title={m.type ?? undefined} style={{ maxWidth: 260 }}>
+                    <span className="truncate">{m.title}</span>
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {data.learned.length > 0 && (
+            <div>
+              <div className="section-label" style={{ margin: "0 0 6px" }}>
+                Skills learned this run
+              </div>
+              <div className="col gap-6">
+                {data.learned.map((l) => (
+                  <div className="row gap-8" key={l.name} style={{ fontSize: 12, alignItems: "center" }}>
+                    <span aria-hidden>✨</span>
+                    <span className="mono truncate" style={{ minWidth: 0 }}>
+                      {l.name}
+                    </span>
+                    {l.category && <span className="chip text-xs">{l.category}</span>}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {data.lessons > 0 && (
+            <div>
+              <div className="section-label" style={{ margin: "0 0 6px" }}>
+                Lessons written
+              </div>
+              <p className="text-xs muted" style={{ margin: 0, lineHeight: 1.5 }}>
+                {data.lessons} lesson{data.lessons === 1 ? "" : "s"}
+                {data.lessonPhases.length > 0 ? ` · ${[...new Set(data.lessonPhases)].map(phaseLabel).join(", ")}` : ""}
+              </p>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -1574,18 +2202,24 @@ function TeamConsole({
               const kind = String((e.payload as { kind?: unknown })?.kind ?? "");
               // Routing/loop events (route.*) are the decision-graph's movements — make them pop.
               const route = routeChip(kind);
+              // Learning events (skill/memory recall, lessons, research, contract) — surface inline
+              // with an emoji chip + a clean derived summary so the org's memory use is visible live.
+              const learn = LEARNING_CHIP[kind] ?? null;
+              const learnText = learn ? learningSummary(e) : null;
               const isErr = e.type === "error" || /error|fail|reject/i.test(`${e.type} ${kind}`);
+              // A subtle left border + tint (tokens only) sets a transition/learning line apart from
+              // ordinary chatter without hiding the event's own text. Routes win the accent when both.
+              const accent = route?.color ?? (learn ? TONE_COLOR[learn.tone] : undefined);
+              const showMarkdown = rich && !learn;
               return (
                 <div
-                  className={`log-line${rich ? " rich" : ""}${isErr ? " err" : ""}`}
+                  className={`log-line${showMarkdown ? " rich" : ""}${isErr ? " err" : ""}`}
                   key={e.id}
-                  // A subtle left border + tint (tokens only) sets a stage transition apart
-                  // from ordinary log lines without hiding the event's own text.
                   style={
-                    route
+                    accent
                       ? {
-                          borderLeft: `2px solid ${route.color}`,
-                          background: `color-mix(in srgb, ${route.color} 8%, transparent)`,
+                          borderLeft: `2px solid ${accent}`,
+                          background: `color-mix(in srgb, ${accent} 8%, transparent)`,
                           paddingLeft: 8,
                           borderRadius: "var(--radius-sm)",
                         }
@@ -1605,13 +2239,22 @@ function TeamConsole({
                         {route.label}
                       </Badge>
                     )}
-                    {!rich && (
-                      <span style={{ minWidth: 0, flex: 1, wordBreak: "break-word", color: isErr ? "var(--red)" : undefined }}>
-                        {e.text}
-                      </span>
+                    {learn && (
+                      <Badge tone={learn.tone}>
+                        <span aria-hidden>{learn.emoji}</span> {learn.label}
+                      </Badge>
+                    )}
+                    {learn ? (
+                      <span style={{ minWidth: 0, flex: 1, wordBreak: "break-word" }}>{learnText ?? e.text}</span>
+                    ) : (
+                      !rich && (
+                        <span style={{ minWidth: 0, flex: 1, wordBreak: "break-word", color: isErr ? "var(--red)" : undefined }}>
+                          {e.text}
+                        </span>
+                      )
                     )}
                   </div>
-                  {rich && <Markdown text={e.text} className="md-log" />}
+                  {showMarkdown && <Markdown text={e.text} className="md-log" />}
                 </div>
               );
             })
@@ -1734,6 +2377,10 @@ export function LiveBuild({ missionKey }: { missionKey: string }) {
   const [editOpen, setEditOpen] = useState(false);   // the inline "Edit mission" card is expanded
   const [atBottom, setAtBottom] = useState(true);    // console pinned to the newest line?
   const [consoleTall, setConsoleTall] = useState(false); // expanded (taller) console
+  // Learning transparency: the cited research brief(s), the Spec Contract, and its feedback ledger.
+  const [research, setResearch] = useState<ResearchBrief[]>([]);
+  const [contract, setContract] = useState<Contract | null>(null);
+  const [contractFeedback, setContractFeedback] = useState<ContractFeedback[]>([]);
 
   const confirm = useConfirm();
   const router = useRouter();
@@ -2118,6 +2765,26 @@ export function LiveBuild({ missionKey }: { missionKey: string }) {
     };
   }, [missionKey, run?.id, run?.status]);
 
+  // Load the mission's research brief(s) + Spec Contract + feedback ledger. Refetched when the run
+  // changes/finishes so a brief or contract a run produces appears without a manual reload. Failures
+  // just leave the panels empty (the tabs stay hidden) rather than breaking the build view.
+  useEffect(() => {
+    let active = true;
+    Promise.all([
+      getMissionResearch(missionKey).catch(() => [] as ResearchBrief[]),
+      getMissionContract(missionKey).catch(() => null),
+      getMissionContractFeedback(missionKey).catch(() => [] as ContractFeedback[]),
+    ]).then(([r, c, f]) => {
+      if (!active) return;
+      setResearch(r);
+      setContract(c);
+      setContractFeedback(f);
+    });
+    return () => {
+      active = false;
+    };
+  }, [missionKey, run?.id, run?.status]);
+
   // The complete step history (all runs, chronological) with the CURRENT run's live steps overlaid
   // so their status stays fresh. Drives the Pipeline timeline, the Team rail, and the Spec checks.
   const allSteps = useMemo(() => {
@@ -2168,6 +2835,19 @@ export function LiveBuild({ missionKey }: { missionKey: string }) {
     const id = mission?.teamId;
     return id ? (teams.find((t) => t.id === id)?.name ?? null) : null;
   }, [teams, mission?.teamId]);
+
+  // What the org recalled / learned during THIS run — drives the collapsible Learning panel.
+  const learning = useMemo(() => summarizeLearning(events), [events]);
+  const hasResearch = research.length > 0;
+  // Contract + Research tabs are inserted (after Spec) ONLY when the mission has that data.
+  const tabs = useMemo<TabDef[]>(() => {
+    const t: TabDef[] = [...BASE_TABS];
+    if (hasResearch) t.splice(2, 0, { key: "research", label: "Research" });
+    if (contract) t.splice(2, 0, { key: "contract", label: "Contract" });
+    return t;
+  }, [hasResearch, contract]);
+  // If the selected tab isn't currently visible (its data went away), fall back to Pipeline.
+  const activeTab: TabKey = tabs.some((t) => t.key === tab) ? tab : "pipeline";
 
   const gated = run?.status === "blocked" || hasOpenGate;
   // A run is "active" while it is running or suspended on a gate — that's when Force-stop applies.
@@ -2312,10 +2992,10 @@ export function LiveBuild({ missionKey }: { missionKey: string }) {
               content keeps its own scrollbar, in the content area under the tabs. */}
           <div className="card mv-tabcard">
             <div className="tabs mv-tabbar" style={{ margin: 0, padding: "6px 16px 0", borderBottom: "1px solid var(--line)" }}>
-              {TABS.map((t) => (
+              {tabs.map((t) => (
                 <button
                   key={t.key}
-                  className={cx("tab", tab === t.key && "active")}
+                  className={cx("tab", activeTab === t.key && "active")}
                   onClick={() => setTab(t.key)}
                 >
                   {t.label}
@@ -2323,10 +3003,12 @@ export function LiveBuild({ missionKey }: { missionKey: string }) {
               ))}
             </div>
             <div className="card-body mv-tabbody">
-              {tab === "pipeline" && <PipelineTimeline rows={rows} />}
-              {tab === "spec" && <SpecTab mission={mission} rows={rows} />}
-              {tab === "diff" && <DiffTab diff={diff} mission={mission} />}
-              {tab === "qa" && <QaTab qa={qa} />}
+              {activeTab === "pipeline" && <PipelineTimeline rows={rows} />}
+              {activeTab === "spec" && <SpecTab mission={mission} rows={rows} />}
+              {activeTab === "contract" && contract && <ContractPanel contract={contract} feedback={contractFeedback} />}
+              {activeTab === "research" && <ResearchPanel briefs={research} />}
+              {activeTab === "diff" && <DiffTab diff={diff} mission={mission} />}
+              {activeTab === "qa" && <QaTab qa={qa} />}
             </div>
           </div>
 
@@ -2358,6 +3040,7 @@ export function LiveBuild({ missionKey }: { missionKey: string }) {
           {mission.projectPath && mission.projectKind === "app" && (
             <RunAppCard missionKey={mission.key} shipped={shipped} />
           )}
+          {learning.hasAny && <LearningPanel data={learning} />}
           <TeamCard team={team} />
           <DetailsCard mission={mission} teamName={teamName} />
           <ApprovalGate mission={mission} run={run} gated={gated} busy={busy} onDecide={onDecide} />
