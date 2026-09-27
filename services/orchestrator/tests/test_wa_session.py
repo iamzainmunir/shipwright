@@ -66,6 +66,14 @@ def test_start_captures_brief() -> None:
     assert intent.args["brief"] == "build a todo app"
 
 
+def test_slash_commands_are_accepted() -> None:
+    # WhatsApp agents commonly use slash-commands — a leading "/" must not break classification.
+    assert parse_intent("/help", _session()).kind == "help"
+    assert parse_intent("/status", _session()).kind == "status"
+    si = parse_intent("/start build a todo app", _session())
+    assert si.kind == "start" and si.args["brief"] == "build a todo app"
+
+
 def test_cancel_and_mission_capture_key() -> None:
     assert parse_intent("cancel M-152", _session()).args["mission_key"] == "M-152"
     assert parse_intent("mission FND-142", _session()).args["mission_key"] == "FND-142"

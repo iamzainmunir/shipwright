@@ -101,6 +101,10 @@ def parse_intent(text: str, session: WaSessionState) -> Intent:
     Order matters: state-sensitive branches (confirm / answer / drafting) run first, because in those
     states the same words mean different things (a bare "yes" is a confirmation, not an approval)."""
     raw = (text or "").strip()
+    # Accept slash-commands (WhatsApp agents often use "/help", "/status", "/start …"): strip a single
+    # leading slash from the first token so "/help" reads the same as "help".
+    if raw.startswith("/") and not raw.startswith("//"):
+        raw = raw[1:].lstrip()
     low = raw.lower()
     if not raw:
         return Intent("help")
