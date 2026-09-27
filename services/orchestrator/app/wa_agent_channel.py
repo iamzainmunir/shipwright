@@ -60,6 +60,8 @@ async def poll_updates(cfg: dict, offset: str | None, *, client: httpx.AsyncClie
         r = await client.get(f"{_BASE_URL}/updates", params=params, headers=_headers(cfg))
         if r.status_code == 200:
             return r.json() or {}
+        if r.status_code == 204:
+            return {}  # No Content — the long-poll timed out with no new messages (normal, not an error)
         log.warning("wa_agent.poll_status", status=r.status_code)
     except Exception as exc:  # noqa: BLE001 — a bad poll must never crash the loop
         log.warning("wa_agent.poll_error", error=str(exc))

@@ -82,6 +82,15 @@ async def test_poll_once_routes_replies_and_persists_offset():
     assert prefs.notify_config["whatsappAgentOffset"] == "off-2"
 
 
+async def test_poll_once_204_is_clean_empty():
+    # 204 No Content = long-poll timed out with no new messages — a no-op, not an error.
+    store, engine = _engine()
+    await _configure(store)
+    client = _FakeClient(get_resp=_Resp(204, {}))
+    assert await ch.poll_once(store, engine, client=client) is None
+    assert client.posts == []  # nothing to reply to
+
+
 async def test_poll_once_cold_start_omits_offset():
     store, engine = _engine()
     await _configure(store)
