@@ -22,6 +22,8 @@ import re
 from dataclasses import dataclass, field
 from enum import StrEnum
 
+from foundry_core.brand import BRAND_NAME
+
 
 class WaState(StrEnum):
     """Where a sender's conversation currently sits."""
@@ -68,7 +70,7 @@ _CONFIRM_WORDS = frozenset({"confirm", "yes", "y", "yeah", "yep", "ok", "okay", 
 _ABORT_PHRASES = frozenset({"abort", "nevermind", "never mind", "cancel that", "cancel that."})
 
 _HELP_TEXT = (
-    "Foundry on WhatsApp — what I understand:\n"
+    f"{BRAND_NAME} on WhatsApp — what I understand:\n"
     "• start <brief> — kick off a mission (I'll ask you to confirm)\n"
     "• cancel <KEY> — stop a mission (I'll ask you to confirm)\n"
     "• retry <KEY> — resume a stopped mission\n"

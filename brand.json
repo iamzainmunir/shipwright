@@ -1,0 +1,10 @@
+{
+  "name": "Shipwright",
+  "tagline": "Autonomous Engineering Org",
+  "projectsDirName": "ShipwrightProjects",
+  "theme": {
+    "brand": "#7c5cff",
+    "brand2": "#9d7bff",
+    "brandInk": "#ffffff"
+  }
+}

@@ -24,6 +24,7 @@ from email.message import EmailMessage
 
 import httpx
 import structlog
+from foundry_core.brand import BRAND_NAME
 from foundry_core.enums import BlockerKind
 from foundry_core.models import Blocker, Mission
 
@@ -142,7 +143,7 @@ class Notifier:
         # WhatsApp session so the user's next free-text reply routes back to submit_clarification.
         if blocker.kind == BlockerKind.QUESTION or blocker.kind == "question":
             detail = self._blocker_detail(blocker)
-            subject = f"[Shipwright] Question — {mission.key}: {mission.title}"
+            subject = f"[{BRAND_NAME}] Question — {mission.key}: {mission.title}"
             body = (f"I need your input on {mission.key} ({mission.title}).\n\n{detail}\n\n"
                     "Reply here with your answer.")
             await self._arm_wa_question(mission, blocker)
@@ -151,7 +152,7 @@ class Notifier:
         is_approval = blocker.kind == BlockerKind.APPROVAL
         event = EV_APPROVAL if is_approval else EV_BLOCKER
         head = "Approval needed" if is_approval else "Mission blocked"
-        subject = f"[Shipwright] {head} — {mission.key}: {mission.title}"
+        subject = f"[{BRAND_NAME}] {head} — {mission.key}: {mission.title}"
         body = f"{head} on {mission.key} ({mission.title}).\n\n{self._blocker_detail(blocker)}"
         # An approval gate gets interactive Approve/Reject buttons on Slack (resolved via the signed
         # /integrations/slack/interactivity endpoint).
@@ -161,14 +162,14 @@ class Notifier:
     async def on_completed(self, mission: Mission) -> None:
         await self._dispatch(
             mission, EV_COMPLETED,
-            subject=f"[Shipwright] Shipped — {mission.key}: {mission.title}",
+            subject=f"[{BRAND_NAME}] Shipped — {mission.key}: {mission.title}",
             body=f"{mission.key} ({mission.title}) completed and shipped successfully. 🎉",
         )
 
     async def on_failed(self, mission: Mission, message: str = "") -> None:
         await self._dispatch(
             mission, EV_FAILED,
-            subject=f"[Shipwright] Halted — {mission.key}: {mission.title}",
+            subject=f"[{BRAND_NAME}] Halted — {mission.key}: {mission.title}",
             body=f"{mission.key} ({mission.title}) halted and needs your attention.\n\n{message}".strip(),
         )
 
@@ -184,7 +185,7 @@ class Notifier:
             log.warning("notify.test_prefs_failed", error=str(exc))
             return result
         channels = getattr(prefs, "notify_channels", None) or {}
-        subject = "[Shipwright] Test notification"
+        subject = f"[{BRAND_NAME}] Test notification"
         body = "Your Shipwright notifications are working — this is a test. ✅"
         senders = {
             CH_EMAIL: self._send_email, CH_TWILIO: self._send_twilio,

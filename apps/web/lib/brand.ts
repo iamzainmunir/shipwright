@@ -1,26 +1,27 @@
 /**
- * Branding + theme — the ONE place to rebrand the app.
+ * Branding + theme — reads the ONE canonical source, the repo-root `brand.json` (also read by the
+ * backend's `foundry_core.brand`). Rebranding is a single edit to `brand.json`.
  *
- * Change the product name, tagline, and brand accent colors here; everything else reads from
- * this file. (Deliberately generic-named — not tied to the current brand — so a rename is a
- * one-file edit.) The color tokens defined in `@foundry/ui/tokens.css` are overridden at runtime
- * by `brandCssVars()`, injected once in the root layout.
+ * The color tokens defined in `@foundry/ui/tokens.css` are overridden at runtime by `brandCssVars()`,
+ * injected once in the root layout. (Importing across the app boundary needs `experimental.externalDir`
+ * in next.config.)
  */
+import brand from "../../../brand.json";
 
 export const BRAND = {
   /** Full product name (page titles, sidebar, landing, footer). */
-  name: "Shipwright",
+  name: brand.name,
   /** One-line descriptor shown under the name. */
-  tagline: "Autonomous Engineering Org",
+  tagline: brand.tagline,
   /** Folder name used when suggesting where greenfield app builds are created. */
-  projectsDirName: "ShipwrightProjects",
+  projectsDirName: brand.projectsDirName,
 } as const;
 
-/** Brand accent colors. Change these to recolor the whole UI (buttons, links, focus ring, …). */
+/** Brand accent colors. Change these in brand.json to recolor the whole UI (buttons, links, ring, …). */
 export const THEME = {
-  brand: "#7c5cff",
-  brand2: "#9d7bff",
-  brandInk: "#ffffff",
+  brand: brand.theme.brand,
+  brand2: brand.theme.brand2,
+  brandInk: brand.theme.brandInk,
 } as const;
 
 /** CSS that overrides the brand-accent tokens from THEME. Injected after the token stylesheet
