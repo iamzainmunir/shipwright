@@ -104,6 +104,41 @@ class Settings(BaseSettings):
         description="Per-run LLM cost ceiling in cents; 0 = uncapped. Exceeded ⇒ halt for the user.",
     )
 
+    # ---- Researcher agent (v2 P6; internet research, read-only, offline-first) ----
+    research_provider: str = Field(
+        default="",
+        validation_alias=AliasChoices("SHIPWRIGHT_RESEARCH_PROVIDER", "FOUNDRY_RESEARCH_PROVIDER"),
+        description="Research backend id (e.g. 'claude' for model-side web search). Empty ⇒ research "
+                    "unavailable and the research phase no-ops (Rule 0, offline-first).",
+    )
+    research_enabled: bool = Field(
+        default=False,
+        validation_alias=AliasChoices("SHIPWRIGHT_RESEARCH_ENABLED", "FOUNDRY_RESEARCH_ENABLED"),
+        description="Run a `research` phase before spec (opt-in). On-demand research is always available "
+                    "when a provider is configured.",
+    )
+    research_allow_domains: str = Field(
+        default="",
+        validation_alias=AliasChoices("SHIPWRIGHT_RESEARCH_ALLOW_DOMAINS", "FOUNDRY_RESEARCH_ALLOW_DOMAINS"),
+        description="Comma-separated allowlist of fetchable domains. Empty ⇒ open web minus the denylist "
+                    "and the hard private-address block.",
+    )
+    research_deny_domains: str = Field(
+        default="",
+        validation_alias=AliasChoices("SHIPWRIGHT_RESEARCH_DENY_DOMAINS", "FOUNDRY_RESEARCH_DENY_DOMAINS"),
+        description="Comma-separated denylist of domains never fetched (in addition to private addresses).",
+    )
+    research_max_iterations: int = Field(
+        default=3,
+        validation_alias=AliasChoices("SHIPWRIGHT_RESEARCH_MAX_ITERATIONS", "FOUNDRY_RESEARCH_MAX_ITERATIONS"),
+        description="Depth cap on the search→read→refine loop, to prevent rabbit-holing.",
+    )
+    research_max_fetch_bytes: int = Field(
+        default=200_000,
+        validation_alias=AliasChoices("SHIPWRIGHT_RESEARCH_MAX_FETCH_BYTES", "FOUNDRY_RESEARCH_MAX_FETCH_BYTES"),
+        description="Per-fetch response size cap (bytes) before truncation.",
+    )
+
     # ---- ticket system (v2 Phase 5; plan 05) ----
     tickets_enabled: bool = Field(
         default=True,

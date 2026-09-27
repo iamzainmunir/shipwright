@@ -26,6 +26,7 @@ from foundry_core.models import (
     Mission,
     ModelConnection,
     Project,
+    ResearchBrief,
     Run,
     Skill,
     Step,
@@ -77,6 +78,7 @@ class InMemoryStore:
         self.model_connections: dict[str, ModelConnection] = {}
         self.skills: dict[str, Skill] = {}
         self.memories: dict[str, Memory] = {}
+        self.research_briefs: dict[str, ResearchBrief] = {}
         self.integrations: dict[str, Integration] = {}
         self.custom_roles: dict[str, CustomRole] = {}
         self.projects: dict[str, Project] = {}
@@ -455,6 +457,22 @@ class InMemoryStore:
 
     async def delete_memory(self, memory_id: str) -> None:
         self.memories.pop(memory_id, None)
+
+    # ---- research briefs (P6) ---------------------------------------------------
+    async def add_research_brief(self, brief: ResearchBrief) -> ResearchBrief:
+        self.research_briefs[brief.id] = brief
+        return brief
+
+    async def list_research_briefs(
+        self, workspace_id: str = DEMO_WS, *, mission_id: str | None = None
+    ) -> list[ResearchBrief]:
+        out = [b for b in self.research_briefs.values() if b.workspace_id == workspace_id
+               and (mission_id is None or b.mission_id == mission_id)]
+        return sorted(out, key=lambda b: b.created_at or datetime.min.replace(tzinfo=UTC),
+                      reverse=True)
+
+    async def get_research_brief(self, brief_id: str) -> ResearchBrief | None:
+        return self.research_briefs.get(brief_id)
 
     # ---- custom roles -----------------------------------------------------------
     async def list_custom_roles(self, workspace_id: str = DEMO_WS) -> list[CustomRole]:

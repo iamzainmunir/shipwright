@@ -242,6 +242,31 @@ class Skill(FoundryModel):
     uses: int = 0
 
 
+class ResearchFinding(FoundryModel):
+    """One cited claim in a research brief. A finding with no resolvable ``source_url`` is dropped
+    upstream (no uncited 'facts') — a citation is what makes a claim usable."""
+
+    claim: str
+    source_url: str
+    confidence: float = 0.5  # 0..1 — load-bearing claims should be corroborated by multiple sources
+
+
+class ResearchBrief(FoundryModel):
+    """A cited, structured research brief produced by the Researcher role (spec P6 §5). It INFORMS the
+    team (spec/build/QA) and grounds the Spec Contract; it is never treated as ground truth without its
+    citation. Persisted per mission + retrievable as a cited memory."""
+
+    id: str
+    org_id: str | None = None
+    workspace_id: str
+    mission_id: str | None = None
+    question: str
+    findings: list[ResearchFinding] = Field(default_factory=list)
+    recommendations: list[str] = Field(default_factory=list)
+    sources: list[str] = Field(default_factory=list)
+    created_at: datetime | None = None
+
+
 class Memory(FoundryModel):
     """A persisted fact with an optional embedding vector (Canon §5; dim 1536 per §13.10)."""
 

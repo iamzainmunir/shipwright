@@ -273,6 +273,7 @@ class AgentRoleKey(StrEnum):
     DEVOPS = "devops"
     DESIGNER = "designer"
     SECURITY = "security"
+    RESEARCHER = "researcher"
     CUSTOM = "custom"
 
 

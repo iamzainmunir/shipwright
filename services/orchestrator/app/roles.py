@@ -76,6 +76,15 @@ ROLE_CATALOG: dict[str, dict[str, object]] = {
         "scope": ("Finds and mitigates security risks across code, infra, and CI/CD. Does NOT own "
                   "feature delivery or general infra ops."),
     },
+    "researcher": {
+        "skills": ["web-research", "source-evaluation", "api-doc-reading", "competitive-analysis",
+                   "summarization", "citation", "fact-checking"],
+        "scope": ("Gathers external information from the internet (read-only) and produces CITED "
+                  "research briefs to inform the team — best practices, library/API documentation, "
+                  "competitive/prior-art context, and fact-checks. Does NOT write product code, "
+                  "design UI, or make the final decision; it INFORMS the PM/CTO/architect and grounds "
+                  "the Spec Contract."),
+    },
 }
 
 

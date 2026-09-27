@@ -36,6 +36,7 @@ from foundry_core.models import (
     Mission,
     ModelConnection,
     Project,
+    ResearchBrief,
     Run,
     Skill,
     Step,
@@ -62,6 +63,7 @@ from .db_models import (
     MissionRow,
     ModelConnectionRow,
     ProjectRow,
+    ResearchBriefRow,
     RunRow,
     SkillRow,
     StepRow,
@@ -646,6 +648,30 @@ class PostgresStore:
             s.add(MemoryRow(**stored.model_dump()))
             await s.commit()
         return stored
+
+    # ---- research briefs (P6) ---------------------------------------------------
+    async def add_research_brief(self, brief: ResearchBrief) -> ResearchBrief:
+        async with self._sess() as s:
+            s.add(ResearchBriefRow(**brief.model_dump()))
+            await s.commit()
+        return brief
+
+    async def list_research_briefs(
+        self, workspace_id: str = DEMO_WS, *, mission_id: str | None = None
+    ) -> list[ResearchBrief]:
+        async with self._sess() as s:
+            stmt = select(ResearchBriefRow)
+            if mission_id is not None:
+                stmt = stmt.where(ResearchBriefRow.mission_id == mission_id)
+            rows = (await s.scalars(stmt)).all()
+            briefs = [ResearchBrief.model_validate(r) for r in rows]
+        briefs.sort(key=lambda b: b.created_at or _now(), reverse=True)
+        return briefs
+
+    async def get_research_brief(self, brief_id: str) -> ResearchBrief | None:
+        async with self._sess() as s:
+            row = await s.get(ResearchBriefRow, brief_id)
+            return ResearchBrief.model_validate(row) if row is not None else None
 
     async def update_memory(self, memory_id: str, **changes: object) -> Memory:
         async with self._sess() as s:

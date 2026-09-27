@@ -114,6 +114,21 @@ async def get_mission(key: str) -> dict:
     return d
 
 
+@router.get("/{key}/research", summary="Research briefs for a mission",
+            description="x-required-scope: missions:read")
+async def get_mission_research(key: str) -> list[dict]:
+    """Cited research briefs (P6) the Researcher produced for this mission, newest first."""
+    store = get_store()
+    mission = await store.get_mission(key)
+    if mission is None:
+        raise not_found(f"mission {key} not found")
+    lister = getattr(store, "list_research_briefs", None)
+    if lister is None:
+        return []
+    briefs = await lister(mission.workspace_id, mission_id=mission.id)
+    return [b.model_dump(by_alias=True) for b in briefs]
+
+
 _ACTIVE_STATUSES = {"running", "blocked", "queued", "paused"}
 
 

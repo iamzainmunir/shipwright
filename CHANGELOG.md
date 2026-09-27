@@ -22,6 +22,21 @@ make it fire (**P3, part 1**) — all additive/low-risk. The verification-gate s
   - auto-grown skills are **grounded in the real deliverable + the rework the run went through**, and
     carry a populated **category / trigger / instructions** (a usable procedure), not a bare slogan
     (A12/A13).
+- **Researcher agent (P6).** A new **`researcher`** role that can search and read the internet
+  (**read-only**) and produce **cited research briefs** to ground spec/build/QA in current facts. It is
+  hardened because it is the one role touching untrusted web content:
+  - **SSRF guard** — private/loopback/metadata/link-local addresses and non-http(s) schemes are hard
+    blocked; optional per-workspace allowlist + denylist (`is_blocked_url`).
+  - **Secret scrubber** — a query/URL that looks like it carries a token/credential is refused, so
+    secrets never leave in a web request.
+  - **Prompt-injection boundary** — fetched pages are framed as **untrusted DATA, never instructions**;
+    an injection attempt in a page is **flagged, not obeyed**; research can only ever produce a
+    brief/memory — never a write, push, spend, or message-send.
+  - **Cited-only output** — a claim with no resolvable source URL is dropped (no uncited "facts");
+    briefs persist per mission (`research_briefs`, RLS) and become reusable **`REFERENCE`** memories.
+  - **Offline-first (Rule 0)** — with no `SHIPWRIGHT_RESEARCH_PROVIDER` configured, research is
+    unavailable and the opt-in pre-spec `research` phase no-ops; nothing breaks. Network tools are
+    role-gated (only `researcher`) and can never run in the build/QA sandbox loop.
 
 ### Fixed
 - **Auto-grown skills never persisted.** `_persist_skill` referenced a nonexistent `SkillSource.PROJECT`
@@ -64,7 +79,7 @@ make it fire (**P3, part 1**) — all additive/low-risk. The verification-gate s
 
 ### Planned (tracked, next)
 - **A14** skill/agent effectiveness metrics driving routing (needs a migration).
-- P1 Spec Contract + API QA · P7 learning UI · P4/P5 WhatsApp control plane · P6 Researcher agent.
+- P1 Spec Contract + API QA · P7 learning UI · P4/P5 WhatsApp control plane.
 
 ## [2026-09] — on `master`
 

@@ -329,6 +329,7 @@ class RunEngine:
         self.sandbox_root: str | None = s.sandbox_root or None
         self.projects_root: str = s.projects_root
         self._run_cost_budget: int = s.run_cost_budget_cents  # per-run LLM cost ceiling (cents); 0 = off
+        self._research_enabled: bool = s.research_enabled  # opt-in pre-spec research phase (P6)
         self._connector = GitHubConnector(s.github_token, s.github_repo, s.github_base)
         self._builds: dict[str, tuple[object, str]] = {}  # mission_id → (sandbox, branch)
         # Ground-truth facts about the LATEST build, so QA/review/CTO judge the REAL deliverable and
@@ -917,6 +918,10 @@ class RunEngine:
                                           "🧭 Task router: docs change → the build will edit the docs, then "
                                           "QA + review as usual.", kind="triage")
                 phase_key: str | None = start_phase if start_phase in _PHASE_BY_KEY else "intake"
+                # P6: on a FRESH run, optionally do internet research first so spec/build start from
+                # current, cited facts. No-op when disabled or no provider (offline-first).
+                if phase_key == "intake" and self._research_enabled and m0 is not None:
+                    await self._maybe_research(run_id, mission_id)
                 cycles: dict[str, int] = {}   # rework/escalation counters (loop caps)
                 visits: dict[str, int] = {}   # per-phase attempt counter (for the agent's context)
                 reached = 0                   # furthest canonical index → monotonic progress
@@ -1732,6 +1737,57 @@ class RunEngine:
         for agent in await self.store.list_agents(workspace_id):
             if _enum_value(agent.status) != _enum_value(AgentStatus.IDLE):
                 await self.store.update_agent(agent.id, status=AgentStatus.IDLE)
+
+    async def _maybe_research(self, run_id: str, mission_id: str) -> None:
+        """P6 — optional pre-spec internet research. Produces a CITED brief, folds it into the mission
+        requirements (so spec/build/QA prompts start from current facts) and stores it as a REFERENCE
+        memory. Best-effort + failure-isolated: research NEVER fails a run, and it can only add a brief +
+        a memory — it triggers no write/push/spend/message. No-op when disabled or no provider."""
+        from foundry_core.enums import MemoryType
+        from foundry_core.ids import new_ulid
+        from foundry_core.models import Memory
+
+        from . import research
+
+        mission = await self.store.get_mission(mission_id)
+        run = await self.store.get_run(run_id)
+        if mission is None:
+            return
+        researcher = research.get_researcher()
+        if researcher is None:
+            return  # offline-first: no provider → research unavailable, silently skip
+        question = " ".join(x for x in (mission.title, mission.summary, mission.requirements) if x)[:500]
+        ok, _reason = research.scrub_query(question)
+        if not ok:
+            return
+        try:
+            if run and mission:
+                await self._emit(run, mission, AgentRoleKey.RESEARCHER, "status",
+                                 "🔎 Researching current sources before spec…",
+                                 payload={"kind": "research.start"})
+            brief = await research.run_research(self.store, mission, question, researcher=researcher)
+        except Exception:  # noqa: BLE001 — research is best-effort, never fail a run
+            return
+        if brief is None or not brief.findings:
+            return
+        md = research.brief_to_markdown(brief)
+        # Fold the cited brief into the requirements the whole pipeline already reads.
+        merged = f"{mission.requirements or ''}\n\n## Research brief (cited)\n{md}".strip()
+        with contextlib.suppress(Exception):
+            await self.store.update_mission(mission_id, requirements=merged)
+        # Persist as a reusable, cited REFERENCE memory (retrievable across missions).
+        with contextlib.suppress(Exception):
+            mem = Memory(id=new_ulid(), org_id=mission.org_id, workspace_id=mission.workspace_id,
+                         type=MemoryType.REFERENCE, title=f"Research: {brief.question}"[:120], body=md)
+            await self.store.add_memory(mem)
+        run = await self.store.get_run(run_id)
+        mission = await self.store.get_mission(mission_id) or mission
+        if run and mission:
+            await self._emit(run, mission, AgentRoleKey.RESEARCHER, "status",
+                             f"🔎 Research brief ready · {len(brief.findings)} cited finding(s), "
+                             f"{len(brief.sources)} source(s)",
+                             payload={"kind": "research.brief", "briefId": brief.id,
+                                      "findings": len(brief.findings), "sources": brief.sources})
 
     async def _recall_memory(self, mission: Mission) -> str:
         """Retrieve the workspace memories most relevant to this mission and format them for the

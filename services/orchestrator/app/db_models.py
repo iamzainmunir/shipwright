@@ -313,6 +313,22 @@ class MemoryRow(Base):
     updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
+class ResearchBriefRow(Base):
+    """A cited research brief produced by the Researcher role (spec P6). Tenant-scoped like every other
+    table (RLS FORCE + ws_isolation added in migration 0016)."""
+
+    __tablename__ = "research_briefs"
+    id: Mapped[str] = mapped_column(String(40), primary_key=True)
+    org_id: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    workspace_id: Mapped[str] = mapped_column(String(40), index=True)
+    mission_id: Mapped[str | None] = mapped_column(String(40), nullable=True, index=True)
+    question: Mapped[str] = mapped_column(Text)
+    findings: Mapped[list] = mapped_column(JSON, default=list)          # [{claim, source_url, confidence}]
+    recommendations: Mapped[list] = mapped_column(JSON, default=list)
+    sources: Mapped[list] = mapped_column(JSON, default=list)
+    created_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
 class IntegrationRow(Base):
     __tablename__ = "integrations"
     id: Mapped[str] = mapped_column(String(40), primary_key=True)
