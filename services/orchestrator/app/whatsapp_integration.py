@@ -44,6 +44,12 @@ def _digits(value: str) -> str:
     return "".join(ch for ch in (value or "") if ch.isdigit())
 
 
+def normalize_sender(value: str) -> str:
+    """Canonical, provider-independent sender key (digits only) so a Twilio ``whatsapp:+1 415…``, a
+    Meta ``1415…``, and a configured ``+1-415…`` all map to the SAME WhatsApp session."""
+    return _digits(value)
+
+
 def number_allowed(from_raw: str, allowed: list[str]) -> bool:
     """True iff the inbound WhatsApp sender is on the allow-list (compared by digits only, so
     ``whatsapp:+1 415…`` and ``1415…`` match). A signed webhook only proves the message came via

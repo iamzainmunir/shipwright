@@ -19,8 +19,8 @@ import httpx
 from fastapi import APIRouter, Request, Response, status
 
 from ...state import get_engine, get_store
+from ...wa_inbound import handle_stateful
 from ...whatsapp_integration import (
-    handle_message,
     number_allowed,
     parse_numbers,
     verify_meta,
@@ -61,9 +61,10 @@ async def whatsapp_twilio(request: Request):
     sig = request.headers.get("X-Twilio-Signature", "")
     if not verify_twilio(str(cfg.get("twilioAuthToken") or ""), str(request.url), form, sig):
         return Response(status_code=status.HTTP_401_UNAUTHORIZED, content="invalid signature")
-    if not number_allowed(form.get("From", ""), await _allowed_senders()):
+    sender = form.get("From", "")
+    if not number_allowed(sender, await _allowed_senders()):
         return _twiml("")  # sender not authorized — acknowledge without acting
-    reply = await handle_message(form.get("Body", ""), get_store(), get_engine())
+    reply = await handle_stateful(form.get("Body", ""), sender, get_store(), get_engine())
     return _twiml(reply)
 
 
@@ -87,7 +88,7 @@ async def whatsapp_meta(request: Request):
         return Response(status_code=status.HTTP_401_UNAUTHORIZED, content="invalid signature")
     text, sender = _parse_meta(raw)
     if text and sender and number_allowed(sender, await _allowed_senders()):
-        reply = await handle_message(text, get_store(), get_engine())
+        reply = await handle_stateful(text, sender, get_store(), get_engine())
         await _send_meta_reply(cfg, sender, reply)
     return {"ok": True}  # Meta requires a fast 200; the reply goes out via the send API
 

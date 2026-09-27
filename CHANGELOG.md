@@ -22,6 +22,18 @@ make it fire (**P3, part 1**) — all additive/low-risk. The verification-gate s
   - auto-grown skills are **grounded in the real deliverable + the rework the run went through**, and
     carry a populated **category / trigger / instructions** (a usable procedure), not a bare slogan
     (A12/A13).
+- **WhatsApp conversational control plane (P4).** You can now drive missions from WhatsApp free text —
+  **start** a mission, **cancel/end** it, **answer the AI's clarifying questions**, **approve/reject**
+  gates, and query **status** — with a per-sender **session state machine** (`wa_sessions`, TTL-bounded,
+  RLS):
+  - destructive actions (start, cancel) require an explicit **confirm** step; nothing fires on the first
+    message.
+  - the AI's clarifying questions are **pushed to WhatsApp** with a reply protocol and **arm the session**,
+    so the next plain reply routes to `submit_clarification` for the right mission.
+  - sender identity is normalized (digits-only), so Twilio `whatsapp:+1…` and Meta `1…` map to the same
+    session; all inbound stays **signature-verified + sender-allow-listed** and every action is attributed
+    to `whatsapp:<number>`; unknown senders are ignored.
+  - a new `engine.start_mission_from_text(brief)` turns a chat brief into a mission + run.
 - **Spec Contract + strong API QA (P1).** A mission now has ONE documented, versioned **Spec Contract**
   (`contracts` table) that binds spec → build → QA → review to the same expectations — no more "Dev built
   X, QA expected Y" drift:
@@ -94,7 +106,7 @@ make it fire (**P3, part 1**) — all additive/low-risk. The verification-gate s
 
 ### Planned (tracked, next)
 - **A14** skill/agent effectiveness metrics driving routing (needs a migration).
-- P7 learning UI · P4/P5 WhatsApp conversational control plane (data layer landed; inbound wiring next).
+- P7 learning transparency UI · P5 WhatsApp Agent Platform long-poll channel (transport).
 
 ## [2026-09] — on `master`
 

@@ -503,6 +503,32 @@ class RunEngine:
             await self._reset_agents_idle(ws)
             await self.store.update_mission(mission.id, is_blocked=False)
 
+    async def start_mission_from_text(
+        self, brief: str, *, actor: str = "chat", workspace_id: str | None = None,
+        autonomy: AutonomyLevel | str | None = None,
+    ) -> Mission:
+        """Create a mission from a free-text brief (e.g. a WhatsApp 'start …' message) and kick off a
+        run — the entry point the conversational control plane (P4) calls. Title is the first line of
+        the brief; the whole brief becomes the requirements. Returns the created Mission (with its key).
+        """
+        from foundry_core.enums import MissionSource, Priority
+
+        from .seed import DEMO_ORG, DEMO_WS
+        brief = (brief or "").strip()
+        title = (brief.splitlines()[0] if brief else "New mission").strip()[:120] or "New mission"
+        ws = workspace_id or DEMO_WS
+        key = await self.store.next_mission_key()
+        auto = autonomy or AutonomyLevel.SUPERVISED
+        mission = Mission(
+            id=new_ulid(), key=key, org_id=DEMO_ORG, workspace_id=ws, title=title,
+            summary="", source=MissionSource.MANUAL, priority=Priority.P2,
+            stage=MissionStage.BACKLOG, autonomy=auto, progress=0, labels=[],
+            requirements=brief,
+        )
+        await self.store.add_mission(mission)
+        await self.start_run(mission)
+        return mission
+
     async def start_run(self, mission: Mission, *, start_phase: str = "intake") -> Run:
         """Create a Run and kick off execution in the background; return immediately.
 

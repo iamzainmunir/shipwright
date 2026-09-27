@@ -15,6 +15,8 @@ ops/deploy) when the DB value is absent — see :func:`_cfg`.
 from __future__ import annotations
 
 import asyncio
+import contextlib
+import datetime as _dt
 import os
 import smtplib
 import ssl
@@ -34,6 +36,7 @@ EV_BLOCKER = "blocker"
 EV_COMPLETED = "completed"
 EV_FAILED = "failed"
 EV_APPROVAL = "approval"
+EV_QUESTION = "question"   # the AI asked a clarifying question — answerable from chat (P4)
 
 # Channel keys — must match the keys the Settings UI writes into notify_channels.
 CH_EMAIL = "email"
@@ -135,6 +138,16 @@ class Notifier:
 
     # ---- engine entry points ----------------------------------------------------
     async def on_blocker(self, blocker: Blocker, mission: Mission) -> None:
+        # P4: an AI clarifying question is pushable to chat with a reply protocol, and it ARMS the
+        # WhatsApp session so the user's next free-text reply routes back to submit_clarification.
+        if blocker.kind == BlockerKind.QUESTION or blocker.kind == "question":
+            detail = self._blocker_detail(blocker)
+            subject = f"[Shipwright] Question — {mission.key}: {mission.title}"
+            body = (f"I need your input on {mission.key} ({mission.title}).\n\n{detail}\n\n"
+                    "Reply here with your answer.")
+            await self._arm_wa_question(mission, blocker)
+            await self._dispatch(mission, EV_QUESTION, subject=subject, body=body)
+            return
         is_approval = blocker.kind == BlockerKind.APPROVAL
         event = EV_APPROVAL if is_approval else EV_BLOCKER
         head = "Approval needed" if is_approval else "Mission blocked"
@@ -236,6 +249,47 @@ class Notifier:
                 await make()
             except Exception as exc:  # one channel failing never blocks the others / the run
                 log.warning("notify.channel_failed", channel=key, mission=mission.key, error=str(exc))
+
+    async def _arm_wa_question(self, mission: Mission, blocker: Blocker) -> None:
+        """Put the primary WhatsApp recipient's session into AWAITING_ANSWER for this question blocker,
+        so their next plain-text reply is routed to the right mission's clarification (P4). Best-effort:
+        skipped when WhatsApp isn't configured; never raises."""
+        upsert = getattr(self._store, "upsert_wa_session", None)
+        if upsert is None:
+            return
+        try:
+            prefs = await self._store.get_settings(mission.workspace_id)
+            channels = getattr(prefs, "notify_channels", None) or {}
+            if not (channels.get(CH_TWILIO) or channels.get(CH_META)):
+                return  # no WhatsApp channel → nothing to arm
+            from .whatsapp_integration import normalize_sender
+            recipients = [getattr(prefs, "notify_whatsapp", "") or ""]
+            cfg = getattr(prefs, "notify_config", None) or {}
+            recipients += (cfg.get("whatsappAllowedSenders") or "").replace(";", ",").split(",")
+            questions = []
+            detail = (blocker.detail or "").strip()
+            if detail.startswith("{"):
+                import json
+                with contextlib.suppress(Exception):
+                    questions = json.loads(detail).get("questions") or []
+            from foundry_core.ids import new_ulid
+            from foundry_core.models import WaSession
+            now = _dt.datetime.now(_dt.UTC)
+            for raw in recipients:
+                key = normalize_sender(raw)
+                if not key:
+                    continue
+                existing = None
+                with contextlib.suppress(Exception):
+                    existing = await self._store.get_wa_session(mission.workspace_id, key)
+                await upsert(WaSession(
+                    id=(existing.id if existing else new_ulid()),
+                    workspace_id=mission.workspace_id, sender=key, state="awaiting_answer",
+                    context={"mission_key": mission.key, "blocker_id": blocker.id, "questions": questions},
+                    updated_at=now, expires_at=now + _dt.timedelta(seconds=1800),
+                ))
+        except Exception as exc:  # noqa: BLE001 — arming is best-effort, never fail a run
+            log.warning("notify.arm_wa_failed", error=str(exc))
 
     @staticmethod
     def _blocker_detail(blocker: Blocker) -> str:
