@@ -4,7 +4,7 @@
 
 <h1 align="center">Shipwright</h1>
 
-**An autonomous AI software company.** You file a ticket; a team of AI agents — PM, architect, engineers, QA, reviewer, DevOps — takes it through spec, planning, build, code review, QA, and ship, and hands you a running application. You hold the gates that matter.
+**An autonomous AI software company.** You file a ticket; a team of AI agents — PM, architect, engineers, a researcher, QA, reviewer, DevOps — takes it through research, spec, planning, build, code review, QA, and ship, and hands you a running application. You hold the gates that matter. It **verifies before it ships, learns from every run, and can be driven end-to-end from WhatsApp.**
 
 > New here? Read **[docs/HOW-IT-WORKS.md](docs/HOW-IT-WORKS.md)** for the full picture — the pipeline, the roles, the models, and the autonomy model, with the *what / how / when* of each.
 
@@ -26,6 +26,29 @@
 
 ---
 
+## What makes it different
+
+Most AI coding tools are a **single agent in your editor** that writes code you then review, run, and verify
+yourself. Shipwright is an **autonomous company** that owns the whole SDLC and is built around the parts that
+make autonomy trustworthy:
+
+- **It verifies before it ships — by construction.** A deterministic ground-truth gate overrides any
+  hallucinated "looks good": an autonomous run auto-merges **only when the work was actually verified** (a
+  real build + runtime/API evidence), otherwise it halts for you. A red test suite blocks the ship. It
+  never auto-ships on a model's say-so.
+- **It checks the APIs, not just the UI.** A single versioned **Spec Contract** binds spec → build → QA to
+  the same expectations, and QA issues **real HTTP requests** asserting status, response shape, and error
+  hygiene — a blocking API failure reopens the build.
+- **It compounds.** Every rework, failure, and ship becomes a durable **lesson/skill** that later missions
+  recall where code is actually written; skills that don't help are **auto-retired**. The org gets better
+  the more it runs — and you can **see** exactly what knowledge is in play, live.
+- **You run it from anywhere.** Full two-way control over **WhatsApp, Slack, and email** — start a mission,
+  answer the AI's questions, and approve gates from a chat, with no app open.
+- **It's a team, in parallel, across repos.** Role-locked specialists (incl. an internet **Researcher**)
+  build in parallel git worktrees and can coordinate one change **across several codebases** under one gate.
+- **Bring your own models, including your Claude seat.** Any provider per agent, or drive the local
+  `claude` CLI (your subscription) as a provider.
+
 ## What it does
 
 Give Shipwright a brief ("Build a simple notes app", "Fix this bug", "Add an endpoint"). It:
@@ -34,10 +57,10 @@ Give Shipwright a brief ("Build a simple notes app", "Fix this bug", "Add an end
 2. **Plans** — the PM + CTO break the spec into a dependency-ordered task graph and create tickets on a built-in board, one per part, assigned to the right engineer by role and skill.
 3. **Builds** — engineers implement their slices **in parallel**, each in an isolated git worktree, then the work is merged into one coherent codebase.
 4. **Reviews the code** — the CTO reviews correctness, security, scope, and the tech bar.
-5. **Verifies it works** — QA runs the *real* app (boots its server, drives a headless browser) and checks each acceptance criterion by behaviour.
-6. **Ships** — DevOps merges/deploys behind the approval gate you configured.
+5. **Verifies it works** — QA runs the *real* app (boots its server, drives a headless browser, **and issues real API requests** against the Spec Contract) and checks each acceptance criterion by behaviour.
+6. **Ships** — DevOps merges/deploys behind the approval gate you configured — **and only when the build is actually verified**.
 
-Every deliverable is real, runnable code on disk — never a mock. When the automated team can't produce something shippable, it **stops and asks you** rather than shipping broken work.
+Every deliverable is real, runnable code on disk — never a mock. When the automated team can't produce something shippable, it **stops and asks you** rather than shipping broken work. And every run feeds the org's **memory + skills**, so the next mission starts smarter.
 
 ## How it works (the short version)
 
@@ -66,8 +89,9 @@ Each mission runs on a **team** of role-locked agents — every agent does only 
 | **CTO** | architecture decisions + the code review | write day-to-day feature code |
 | **Backend** | server APIs, data, business logic | UI/styling |
 | **Frontend** | UI, components, client state | server APIs / data models |
-| **QA** | verify behaviour against acceptance criteria | review code style/architecture |
+| **QA** | verify behaviour against acceptance criteria **+ the API contract** | review code style/architecture |
 | **DevOps** | merge, deploy, rollback | write product features |
+| **Researcher** | search + read the internet (read-only), produce **cited** briefs | write code, design, or decide |
 | **Designer / BA / Security** | UX, requirements, threat modelling | out-of-lane work |
 
 If a builder is genuinely blocked or a requirement conflicts, it **asks the CTO** instead of guessing, and continues with the decision.
@@ -89,13 +113,18 @@ Set per mission: **manual → assisted → supervised → autonomous**. Autonomo
 
 - **Multi-project coordinated change** — select several codebases (e.g. a service **and** its gateway) on the **Projects** screen and prompt one change; the team edits each affected repo on its own `fix/…` branch with the whole working set as shared context, so a new API in the service gets wired into the gateway in the same run — under one review → QA → ship gate.
 - **Parallel, coherent builds** — fork-join across role-matched engineers in isolated git worktrees, dependency-ordered, merged; targeted rework rebuilds only what failed.
+- **Verified-before-ship gate** — a deterministic ground-truth check overrides any hallucinated "looks good": an autonomous run auto-merges **only when the work was actually verified** (real build + runtime/API evidence), a **red test suite blocks the ship**, and anything unverified **halts for you** instead of merging.
+- **Spec Contract + real API/response QA** — one versioned contract (UI + API items) binds spec → build → QA to the same expectations; QA issues **real HTTP requests** and asserts status / response shape / error hygiene, discovers endpoints (OpenAPI or source), and a **blocking API failure reopens the build** — with a feedback ledger (expected vs actual) fed into the next rework.
 - **Real-app QA harness** — boots the app's own server (Node/Vite/static), drives headless Chromium, checks page load / render / console errors / acceptance-criteria text, captures screenshots — verdicts are grounded in what actually ran.
+- **Self-improvement (compounding learning)** — every rework and failure becomes a durable **lesson** and every ship a reusable **skill**, recalled into later missions *where code is written*; skills are ranked by real effectiveness and **auto-retired** when they don't help. A per-run **cost budget** halts a run before it overspends.
+- **Researcher agent** — an internet-research role (read-only) that produces **cited** briefs to ground the spec/build in current facts, hardened against SSRF + prompt-injection (fetched pages are untrusted data; secrets never leave in a query). Offline-first — inert until a research backend is configured.
+- **Learning transparency UI** — see, live, which skills + memories fed each phase (and when recall was empty), the lessons/skills a run produced, per-skill effectiveness, and each mission's research brief + Spec Contract.
 - **Built-in ticket board** — a Jira-like board (To Do → In Progress → In Review → QA → Done) that live-updates as the team works, plus an optional one-way **Jira mirror**.
 - **Run app** — one click on a shipped mission boots the built app on a free localhost port and hands you a link to test it (then Stop to free the port).
 - **Models & usage** — per-agent model binding, failover, real per-run token/cost metering, budgets and rate caps.
 - **Skills & memory** — reusable skills the team auto-invokes, and a workspace memory that keeps decisions consistent across missions.
 - **Integrations** — GitHub (push/PR at the ship gate, your consent required), Jira, and a real Chrome the QA agents can drive.
-- **Notifications & two-way control** — opt-in **email, WhatsApp, or Slack** alerts when a mission is blocked, needs approval, ships, or halts (configured per workspace in Settings; provider credentials are stored in the DB, redacted on read). All three are **two-way**: ask for a live status (`status`, `missions`, `mission SW-142`) or resolve an approval gate without opening the app — Slack **Approve/Reject** buttons + `/shipwright`, or a WhatsApp/email reply of `approve SW-142` / `reject SW-142`. **Slack (Socket Mode) and Email (IMAP) need no public URL** — they work behind a firewall; Slack/WhatsApp are signature-verified, email is gated by a sender allow-list. See [docs/notifications.md](docs/notifications.md).
+- **Notifications & two-way control** — opt-in **email, WhatsApp, or Slack** alerts when a mission is blocked, needs approval, ships, or halts (configured per workspace in Settings; provider credentials are stored in the DB, redacted on read). All are **two-way**: ask for a live status or resolve an approval gate without opening the app — Slack **Approve/Reject** buttons + `/shipwright`, or a WhatsApp/email reply of `approve SW-142` / `reject SW-142`. **WhatsApp is a full conversational control plane** — `start <brief>` a mission, **answer the AI's clarifying questions**, and cancel/retry, all from a chat (destructive actions confirm first). **Slack (Socket Mode), Email (IMAP), and the new no-tunnel WhatsApp Agent Platform channel need no public URL** — they work behind a firewall; Slack/WhatsApp webhooks are signature-verified, email is gated by a sender allow-list. See [docs/notifications.md](docs/notifications.md).
 - **Configurable** — set the **mission-key prefix** (e.g. `SW-142`) and the **projects directory** per workspace in Settings; bring your own model-provider credentials.
 
 ---
@@ -167,15 +196,19 @@ On `SHIPWRIGHT_ENV=local` the orchestrator **auto-migrates to head** (`alembic u
 
 ```bash
 curl -s localhost:8000/healthz          # startup log reads: backend=postgres … autoMigrate=True
-psql -h 127.0.0.1 -U foundry_app -d foundry_dev -c "select version_num from alembic_version;"   # head = 0010
+psql -h 127.0.0.1 -U foundry_app -d foundry_dev -c "select version_num from alembic_version;"   # head = 0019
 ```
 
 ## Tests
 
 ```bash
-cd services/orchestrator && uv run ruff check app/ tests/ && uv run pytest      # backend
-cd apps/web && pnpm exec tsc --noEmit && pnpm exec next lint                     # web
+cd services/orchestrator && uv run ruff check . && uv run pytest                 # backend (400+ tests)
+cd apps/web && pnpm --filter @foundry/web typecheck && pnpm --filter @foundry/web lint   # web
 ```
+
+CI additionally runs the **Alembic migration gate** (`alembic upgrade head` → `alembic check` →
+`downgrade base` → `upgrade head`) and an **RLS isolation gate** (every tenant table has FORCE row-level
+security + a `ws_isolation` policy) against a real Postgres.
 
 ## Docs
 
