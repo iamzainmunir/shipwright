@@ -17,6 +17,8 @@ from foundry_core.models import (
     Artifact,
     AutonomyPolicy,
     Blocker,
+    Contract,
+    ContractFeedback,
     CustomRole,
     Event,
     Integration,
@@ -34,6 +36,7 @@ from foundry_core.models import (
     Ticket,
     TicketEvent,
     TicketLink,
+    WaSession,
 )
 
 from .memory_search import compute_embedding, rank_memories
@@ -79,6 +82,9 @@ class InMemoryStore:
         self.skills: dict[str, Skill] = {}
         self.memories: dict[str, Memory] = {}
         self.research_briefs: dict[str, ResearchBrief] = {}
+        self.contracts: dict[str, Contract] = {}
+        self.contract_feedback: dict[str, ContractFeedback] = {}
+        self.wa_sessions: dict[str, WaSession] = {}
         self.integrations: dict[str, Integration] = {}
         self.custom_roles: dict[str, CustomRole] = {}
         self.projects: dict[str, Project] = {}
@@ -473,6 +479,49 @@ class InMemoryStore:
 
     async def get_research_brief(self, brief_id: str) -> ResearchBrief | None:
         return self.research_briefs.get(brief_id)
+
+    # ---- spec contract + feedback ledger (P1) -----------------------------------
+    async def upsert_contract(self, contract: Contract) -> Contract:
+        stored = contract.model_copy(update={"updated_at": _now(),
+                                             "created_at": contract.created_at or _now()})
+        self.contracts[stored.id] = stored
+        return stored
+
+    async def get_contract(self, mission_id: str) -> Contract | None:
+        found = [c for c in self.contracts.values() if c.mission_id == mission_id]
+        return max(found, key=lambda c: c.version) if found else None
+
+    async def add_contract_feedback(self, fb: ContractFeedback) -> ContractFeedback:
+        stored = fb.model_copy(update={"created_at": fb.created_at or _now()})
+        self.contract_feedback[stored.id] = stored
+        return stored
+
+    async def list_contract_feedback(
+        self, contract_id: str, *, item_id: str | None = None
+    ) -> list[ContractFeedback]:
+        out = [f for f in self.contract_feedback.values() if f.contract_id == contract_id
+               and (item_id is None or f.item_id == item_id)]
+        return sorted(out, key=lambda f: f.created_at or datetime.min.replace(tzinfo=UTC))
+
+    # ---- whatsapp sessions (P4) -------------------------------------------------
+    async def get_wa_session(self, workspace_id: str, sender: str) -> WaSession | None:
+        for sess in self.wa_sessions.values():
+            if sess.workspace_id == workspace_id and sess.sender == sender:
+                return sess
+        return None
+
+    async def upsert_wa_session(self, session: WaSession) -> WaSession:
+        stored = session.model_copy(update={"updated_at": _now()})
+        self.wa_sessions[stored.id] = stored
+        return stored
+
+    async def expire_wa_sessions(self, *, now: datetime | None = None) -> int:
+        cutoff = now or _now()
+        dead = [sid for sid, s in self.wa_sessions.items()
+                if s.expires_at is not None and s.expires_at < cutoff]
+        for sid in dead:
+            self.wa_sessions.pop(sid, None)
+        return len(dead)
 
     # ---- custom roles -----------------------------------------------------------
     async def list_custom_roles(self, workspace_id: str = DEMO_WS) -> list[CustomRole]:

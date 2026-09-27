@@ -329,6 +329,52 @@ class ResearchBriefRow(Base):
     created_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
+class ContractRow(Base):
+    """A mission's versioned Spec Contract (P1). Tenant-scoped (RLS added in migration 0017)."""
+
+    __tablename__ = "contracts"
+    id: Mapped[str] = mapped_column(String(40), primary_key=True)
+    org_id: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    workspace_id: Mapped[str] = mapped_column(String(40), index=True)
+    mission_id: Mapped[str] = mapped_column(String(40), index=True)
+    version: Mapped[int] = mapped_column(Integer, default=1)
+    items: Mapped[list] = mapped_column(JSON, default=list)
+    created_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class ContractFeedbackRow(Base):
+    """A structured finding against a contract item (P1 feedback ledger). Tenant-scoped (RLS 0017)."""
+
+    __tablename__ = "contract_feedback"
+    id: Mapped[str] = mapped_column(String(40), primary_key=True)
+    org_id: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    workspace_id: Mapped[str] = mapped_column(String(40), index=True)
+    contract_id: Mapped[str] = mapped_column(String(40), index=True)
+    item_id: Mapped[str] = mapped_column(String(80))
+    run_id: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    phase: Mapped[str] = mapped_column(String(32), default="")
+    expected: Mapped[str] = mapped_column(Text, default="")
+    actual: Mapped[str] = mapped_column(Text, default="")
+    severity: Mapped[str] = mapped_column(String(16), default="blocking")
+    feedback: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class WaSessionRow(Base):
+    """A per-sender WhatsApp conversation session (P4). Tenant-scoped (RLS added in migration 0018)."""
+
+    __tablename__ = "wa_sessions"
+    id: Mapped[str] = mapped_column(String(40), primary_key=True)
+    org_id: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    workspace_id: Mapped[str] = mapped_column(String(40), index=True)
+    sender: Mapped[str] = mapped_column(String(64), index=True)
+    state: Mapped[str] = mapped_column(String(24), default="idle")
+    context: Mapped[dict] = mapped_column(JSON, default=dict)
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
 class IntegrationRow(Base):
     __tablename__ = "integrations"
     id: Mapped[str] = mapped_column(String(40), primary_key=True)

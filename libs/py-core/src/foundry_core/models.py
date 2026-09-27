@@ -358,6 +358,82 @@ class AcceptanceCriterion(FoundryModel):
     severity: str = "blocking"
 
 
+class ContractItem(FoundryModel):
+    """One item in a mission's Spec Contract (P1) — the single source of truth every agent grades
+    against. Two families share this shape, discriminated by ``kind``:
+
+      * ``kind="ui"``  — a user-facing criterion: ``route`` + ``expect_text``/``expect_selector``
+        (a superset of :class:`AcceptanceCriterion`, so the QA harness can consume it unchanged).
+      * ``kind="api"`` — an API/response criterion: ``method`` + ``path`` + ``request``/``response``/
+        ``errors`` shapes the deterministic API-checks rung asserts against.
+
+    ``severity`` defaults to ``blocking`` so an UNMARKED failure is fail-safe (reopens the build)."""
+
+    id: str
+    kind: str = "ui"                     # "ui" | "api"
+    criterion: str = ""
+    severity: str = "blocking"           # "blocking" | "non_blocking"
+    # UI family
+    route: str | None = None
+    expect_text: list[str] = Field(default_factory=list)
+    expect_selector: list[str] = Field(default_factory=list)
+    # API family
+    method: str | None = None            # GET/POST/PUT/PATCH/DELETE
+    path: str | None = None              # e.g. "/api/tasks"
+    request: dict = Field(default_factory=dict)   # {schema?, headers?, auth?, example?}
+    response: dict = Field(default_factory=dict)  # {status, contentType?, requiredKeys[]?, schema?}
+    errors: list[dict] = Field(default_factory=list)  # [{when, status, shape?}]
+
+
+class Contract(FoundryModel):
+    """A mission's versioned Spec Contract (P1): the documented, single source of truth binding
+    spec/dev/QA/review/CTO to the same UI + API expectations. Each amendment bumps ``version``."""
+
+    id: str
+    org_id: str | None = None
+    workspace_id: str
+    mission_id: str
+    version: int = 1
+    items: list[ContractItem] = Field(default_factory=list)
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+
+
+class ContractFeedback(FoundryModel):
+    """A structured finding against a contract item (P1 feedback ledger). Every QA finding / review
+    comment / CTO note references a contract item id and carries expected-vs-actual, so rework is
+    grounded in the contract instead of prose-only 'make it better'. A blocking failure auto-opens a
+    linked Bug ticket."""
+
+    id: str
+    org_id: str | None = None
+    workspace_id: str
+    contract_id: str
+    item_id: str
+    run_id: str | None = None
+    phase: str = ""
+    expected: str = ""
+    actual: str = ""
+    severity: str = "blocking"
+    feedback: str = ""
+    created_at: datetime | None = None
+
+
+class WaSession(FoundryModel):
+    """A per-sender WhatsApp conversation session (P4 control plane): tracks the current intent state
+    and any pending prompt so free-text messages are stateful (start → confirm, ask → answer). TTL-
+    bounded; tenant-scoped (RLS)."""
+
+    id: str
+    org_id: str | None = None
+    workspace_id: str
+    sender: str                          # the WhatsApp number/handle
+    state: str = "idle"                  # idle | awaiting_confirm | awaiting_answer | drafting_mission
+    context: dict = Field(default_factory=dict)
+    updated_at: datetime | None = None
+    expires_at: datetime | None = None
+
+
 class Ticket(FoundryModel):
     """A work item on Shipwright's built-in Jira-like board (plan 05 §1). One canonical model, two
     views: this internal board and (optionally) the Jira mirror. Epics map to missions, Stories to

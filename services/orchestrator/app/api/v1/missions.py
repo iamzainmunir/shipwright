@@ -114,6 +114,39 @@ async def get_mission(key: str) -> dict:
     return d
 
 
+@router.get("/{key}/contract", summary="Spec Contract for a mission",
+            description="x-required-scope: missions:read")
+async def get_mission_contract(key: str) -> dict | None:
+    """The mission's versioned Spec Contract (UI + API items) — the single source of truth (P1)."""
+    store = get_store()
+    mission = await store.get_mission(key)
+    if mission is None:
+        raise not_found(f"mission {key} not found")
+    getter = getattr(store, "get_contract", None)
+    if getter is None:
+        return None
+    contract = await getter(mission.id)
+    return contract.model_dump(by_alias=True) if contract is not None else None
+
+
+@router.get("/{key}/contract/feedback", summary="Contract feedback ledger",
+            description="x-required-scope: missions:read")
+async def get_mission_contract_feedback(key: str) -> list[dict]:
+    """Structured findings against the mission's contract items (P1 feedback ledger)."""
+    store = get_store()
+    mission = await store.get_mission(key)
+    if mission is None:
+        raise not_found(f"mission {key} not found")
+    get_c = getattr(store, "get_contract", None)
+    list_fb = getattr(store, "list_contract_feedback", None)
+    if get_c is None or list_fb is None:
+        return []
+    contract = await get_c(mission.id)
+    if contract is None:
+        return []
+    return [f.model_dump(by_alias=True) for f in await list_fb(contract.id)]
+
+
 @router.get("/{key}/research", summary="Research briefs for a mission",
             description="x-required-scope: missions:read")
 async def get_mission_research(key: str) -> list[dict]:

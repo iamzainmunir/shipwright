@@ -51,13 +51,17 @@ async def run(
     criteria: list[AcceptanceCriterion] | None = None, step_id: str | None = None,
     total_timeout_s: int = 180, video: str = "off", allow_npm: bool = True,
     npm_timeout_s: int = 120, serve_ready_timeout_s: int = 15,
+    api_items: list[dict] | None = None,
 ) -> QaEvidence:
-    """Run the harness. Returns QaEvidence at whatever rung succeeded; never raises."""
+    """Run the harness. Returns QaEvidence at whatever rung succeeded; never raises.
+
+    ``api_items`` (P1) are the Spec Contract's API items: when the app is served, the harness issues
+    real requests and asserts status/shape/error-hygiene against them (a deterministic API rung)."""
     criteria = criteria or []
     try:
         return await asyncio.wait_for(
             _run_inner(workspace_id, mission_id, run_id, project_path, criteria, step_id,
-                       video, allow_npm, npm_timeout_s, serve_ready_timeout_s),
+                       video, allow_npm, npm_timeout_s, serve_ready_timeout_s, api_items or []),
             timeout=total_timeout_s,
         )
     except TimeoutError:
@@ -71,7 +75,7 @@ async def run(
 
 async def _run_inner(
     workspace_id, mission_id, run_id, project_path, criteria, step_id,
-    video, allow_npm, npm_timeout_s, serve_ready_timeout_s,
+    video, allow_npm, npm_timeout_s, serve_ready_timeout_s, api_items=None,
 ) -> QaEvidence:
     pr = probe(project_path)
     out_dir = run_artifact_dir(mission_id, run_id, "qa")
@@ -97,6 +101,17 @@ async def _run_inner(
 
         # HTTP smoke checks always run (the floor).
         ev.checks = await http_smoke_checks(app.base_url, criteria, degraded=degraded)
+
+        # P1: deterministic API rung — real requests asserting the Spec Contract's API items
+        # (status/shape/error-hygiene). Safe verbs only (never fires undeclared mutations). Never raises.
+        if api_items:
+            try:
+                from .api_checks import api_checks as _api_checks
+                from .discover import discover_endpoints
+                endpoints = await discover_endpoints(project_path, app.base_url)
+                ev.checks += await _api_checks(app.base_url, api_items, endpoints)
+            except Exception as exc:  # noqa: BLE001 — API checks are evidence, never fail the run
+                ev.checks.append(CheckResult("api:harness", "API checks", "warn", str(exc)[:160]))
 
         # Try to add browser evidence on top (L0/L1); degrade to http_only (L3) if unavailable.
         ok, why = await cap_mod.browser_available()

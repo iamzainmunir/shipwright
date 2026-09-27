@@ -22,6 +22,21 @@ make it fire (**P3, part 1**) — all additive/low-risk. The verification-gate s
   - auto-grown skills are **grounded in the real deliverable + the rework the run went through**, and
     carry a populated **category / trigger / instructions** (a usable procedure), not a bare slogan
     (A12/A13).
+- **Spec Contract + strong API QA (P1).** A mission now has ONE documented, versioned **Spec Contract**
+  (`contracts` table) that binds spec → build → QA → review to the same expectations — no more "Dev built
+  X, QA expected Y" drift:
+  - the spec phase emits two machine blocks (`foundry-criteria` UI items + a new `foundry-api` block);
+    `contract.parse_contract` folds both into one contract, created once and injected into build (against
+    it), QA and review (grade against it).
+  - a deterministic **API-checks rung** in the QA harness issues **real requests** against the served app
+    and asserts **status, content-type, response shape (required keys), and error hygiene** (unknown route
+    → 404, malformed body → 4xx-not-500, JSON error not a leaked stack trace), plus endpoint **discovery**
+    (OpenAPI, or FastAPI/Express/Next source scan). Safe verbs only — it never fires an undeclared mutation.
+  - a failing **blocking** API item becomes a graded criterion, so it **reopens the build** (a broken API
+    can no longer pass on an LLM verdict); advisory checks stay warnings.
+  - a structured **feedback ledger** (`contract_feedback`) records expected-vs-actual per contract item on
+    every QA failure and is fed back into the next **rework** build, so fixes target the documented gap.
+  - `GET /missions/{key}/contract` and `/contract/feedback` expose it.
 - **Researcher agent (P6).** A new **`researcher`** role that can search and read the internet
   (**read-only**) and produce **cited research briefs** to ground spec/build/QA in current facts. It is
   hardened because it is the one role touching untrusted web content:
@@ -79,7 +94,7 @@ make it fire (**P3, part 1**) — all additive/low-risk. The verification-gate s
 
 ### Planned (tracked, next)
 - **A14** skill/agent effectiveness metrics driving routing (needs a migration).
-- P1 Spec Contract + API QA · P7 learning UI · P4/P5 WhatsApp control plane.
+- P7 learning UI · P4/P5 WhatsApp conversational control plane (data layer landed; inbound wiring next).
 
 ## [2026-09] — on `master`
 

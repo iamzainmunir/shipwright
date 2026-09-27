@@ -27,6 +27,8 @@ from foundry_core.models import (
     Artifact,
     AutonomyPolicy,
     Blocker,
+    Contract,
+    ContractFeedback,
     CustomRole,
     Event,
     Integration,
@@ -44,6 +46,7 @@ from foundry_core.models import (
     Ticket,
     TicketEvent,
     TicketLink,
+    WaSession,
 )
 from sqlalchemy import and_, func, or_, select, text
 from sqlalchemy import delete as sa_delete
@@ -54,6 +57,8 @@ from .db_models import (
     ArtifactRow,
     AutonomyPolicyRow,
     BlockerRow,
+    ContractFeedbackRow,
+    ContractRow,
     CustomRoleRow,
     EventRow,
     IntegrationRow,
@@ -71,6 +76,7 @@ from .db_models import (
     TicketEventRow,
     TicketLinkRow,
     TicketRow,
+    WaSessionRow,
 )
 from .memory_search import compute_embedding, rank_memories
 from .seed import (
@@ -672,6 +678,78 @@ class PostgresStore:
         async with self._sess() as s:
             row = await s.get(ResearchBriefRow, brief_id)
             return ResearchBrief.model_validate(row) if row is not None else None
+
+    # ---- spec contract + feedback ledger (P1) -----------------------------------
+    async def upsert_contract(self, contract: Contract) -> Contract:
+        stored = contract.model_copy(update={"updated_at": _now(),
+                                             "created_at": contract.created_at or _now()})
+        async with self._sess() as s:
+            row = await s.get(ContractRow, stored.id)
+            if row is None:
+                s.add(ContractRow(**stored.model_dump()))
+            else:
+                for k, v in stored.model_dump().items():
+                    setattr(row, k, _col(v))
+            await s.commit()
+        return stored
+
+    async def get_contract(self, mission_id: str) -> Contract | None:
+        async with self._sess() as s:
+            rows = (await s.scalars(
+                select(ContractRow).where(ContractRow.mission_id == mission_id))).all()
+            contracts = [Contract.model_validate(r) for r in rows]
+        return max(contracts, key=lambda c: c.version) if contracts else None
+
+    async def add_contract_feedback(self, fb: ContractFeedback) -> ContractFeedback:
+        stored = fb.model_copy(update={"created_at": fb.created_at or _now()})
+        async with self._sess() as s:
+            s.add(ContractFeedbackRow(**stored.model_dump()))
+            await s.commit()
+        return stored
+
+    async def list_contract_feedback(
+        self, contract_id: str, *, item_id: str | None = None
+    ) -> list[ContractFeedback]:
+        async with self._sess() as s:
+            stmt = select(ContractFeedbackRow).where(ContractFeedbackRow.contract_id == contract_id)
+            if item_id is not None:
+                stmt = stmt.where(ContractFeedbackRow.item_id == item_id)
+            rows = (await s.scalars(stmt)).all()
+            fb = [ContractFeedback.model_validate(r) for r in rows]
+        fb.sort(key=lambda f: f.created_at or _now())
+        return fb
+
+    # ---- whatsapp sessions (P4) -------------------------------------------------
+    async def get_wa_session(self, workspace_id: str, sender: str) -> WaSession | None:
+        async with self._sess() as s:
+            rows = (await s.scalars(
+                select(WaSessionRow).where(WaSessionRow.sender == sender))).all()
+            for r in rows:
+                if r.workspace_id == workspace_id:
+                    return WaSession.model_validate(r)
+            return None
+
+    async def upsert_wa_session(self, session: WaSession) -> WaSession:
+        stored = session.model_copy(update={"updated_at": _now()})
+        async with self._sess() as s:
+            row = await s.get(WaSessionRow, stored.id)
+            if row is None:
+                s.add(WaSessionRow(**stored.model_dump()))
+            else:
+                for k, v in stored.model_dump().items():
+                    setattr(row, k, _col(v))
+            await s.commit()
+        return stored
+
+    async def expire_wa_sessions(self, *, now: datetime | None = None) -> int:
+        cutoff = now or _now()
+        async with self._sess() as s:
+            rows = (await s.scalars(select(WaSessionRow))).all()
+            dead = [r for r in rows if r.expires_at is not None and r.expires_at < cutoff]
+            for r in dead:
+                await s.delete(r)
+            await s.commit()
+        return len(dead)
 
     async def update_memory(self, memory_id: str, **changes: object) -> Memory:
         async with self._sess() as s:

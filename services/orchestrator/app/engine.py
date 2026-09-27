@@ -2019,8 +2019,15 @@ class RunEngine:
             phase.role, "You are a helpful engineering agent.")
         recalled = await self._recall_memory(mission)
         verdict_ask = _VERDICT_ASK.get(phase.key, "")
+        # P1: the spec phase must emit the machine-checkable UI + API contract blocks.
+        if phase.key == "spec":
+            from .contract import API_CONTRACT_ASK
+            from .specdoc import CRITERIA_ASK
+            verdict_ask = (verdict_ask + CRITERIA_ASK + API_CONTRACT_ASK) if verdict_ask \
+                else (CRITERIA_ASK + API_CONTRACT_ASK)
         attempt_line = f"Attempt: {attempt}\n" if attempt > 1 else ""
         build_line = ""
+        contract_line = ""
         if phase.key in ("qa", "review", "cto.decision"):
             # On a resumed run, rebuild the grounding from the on-disk app first (else a wiped
             # in-memory context makes QA falsely fail present features). No-op in the normal flow.
@@ -2029,11 +2036,20 @@ class RunEngine:
             # test result — not a bare file-name summary. Without this the reviewer hallucinates features
             # that don't exist (M-157). Judge strictly against what is shown.
             build_line = await self._deliverable_context(mission_id, mission)
+        # P1: bind build + verification to the ONE documented contract (build against it; QA/review
+        # grade against it). Created once from the spec's machine blocks.
+        if phase.key in ("build.api", "qa", "review", "cto.decision"):
+            await self._ensure_contract(run_id, mission_id, mission)
+            contract_line = await self._contract_block(mission_id)
+        # On a rework build, prepend the contract feedback ledger so the fix targets the documented gaps.
+        if phase.key == "build.api" and attempt > 1:
+            contract_line = (await self._contract_feedback_block(mission_id)) + contract_line
         skills_line, used_skills = await self._recall_skills(mission, phase.role)
         prompt = (
             f"{mission.title}\n\n"
             f"Summary: {mission.summary or '(none)'}\n"
             f"Requirements / brief:\n{mission.requirements or '(none)'}\n"
+            f"{contract_line}"
             f"{build_line}"
             f"{attempt_line}"
             f"{recalled}"
@@ -2100,6 +2116,10 @@ class RunEngine:
         run = await self.store.get_run(run_id)
         if mission is None or run is None:
             return
+
+        # P1: make sure the Spec Contract exists before the build so QA/review grade against it and the
+        # builders' requirements carry the documented UI+API expectations (best-effort, never fails).
+        await self._ensure_contract(run_id, mission_id, mission)
 
         # Build event callbacks. ``who`` tags the emitting agent — empty for a single build, or
         # "<name> · <subtask>" for each parallel worker. ``role`` sets the event's role so the avatar
@@ -2476,9 +2496,18 @@ class RunEngine:
             return  # only a real on-disk build (app / change-in-repo) has something to serve
         settings = get_settings()
         criteria = await self._acceptance_criteria(mission_id)
+        # P1: hand the Spec Contract's API items to the harness so it issues real requests and asserts
+        # status/shape/error-hygiene against them (the "carefully check all APIs/responses" ask).
+        contract = await self._ensure_contract(run_id, mission_id, mission)
+        api_items = []
+        api_sev: dict[str, str] = {}
+        if contract is not None:
+            from .contract import api_items_as_dicts
+            api_items = api_items_as_dicts(contract)
+            api_sev = {i.id: i.severity for i in contract.items if i.kind == "api"}
         ev = await qa_harness.run(
             workspace_id=mission.workspace_id, mission_id=mission_id, run_id=run_id,
-            project_path=project_path, criteria=criteria,
+            project_path=project_path, criteria=criteria, api_items=api_items,
             total_timeout_s=settings.qa_total_timeout_s, video=settings.qa_video,
         )
         for art in ev.artifacts:
@@ -2492,10 +2521,19 @@ class RunEngine:
         checks_out: list[dict] = []
         crit_total = crit_failed = 0
         for c in ev.checks:
-            sev = getattr(crit_by_id.get(c.criterion_id), "severity", None) if c.criterion_id else None
+            cid = c.criterion_id
+            sev = getattr(crit_by_id.get(cid), "severity", None) if cid else None
+            # A FAILING API check becomes a graded criterion so a blocking API failure reopens the build
+            # (id form: "api:<itemId>:<kind>"; "api:uncovered:*" stays advisory).
+            if cid is None and c.id.startswith("api:") and c.status == "fail":
+                parts = c.id.split(":")
+                item_id = parts[1] if len(parts) > 1 else ""
+                if item_id and item_id != "uncovered":
+                    cid = f"api:{item_id}"
+                    sev = api_sev.get(item_id, "blocking")
             checks_out.append({"id": c.id, "name": c.name, "status": c.status,
-                               "detail": c.detail, "criterion_id": c.criterion_id, "severity": sev})
-            if c.criterion_id is not None:
+                               "detail": c.detail, "criterion_id": cid, "severity": sev})
+            if cid is not None:
                 crit_total += 1
                 if c.status == "fail":
                     crit_failed += 1
@@ -2504,6 +2542,29 @@ class RunEngine:
             "checks": checks_out, "crit_total": crit_total, "crit_failed": crit_failed,
             "degradation": ev.degradation, "screenshots": shots,
         }
+        # P1 feedback ledger: record a structured entry (expected vs actual) for each FAILING contract
+        # item, so rework is grounded in the contract and the ledger is visible to agents + the user.
+        if contract is not None:
+            from . import contract as contract_mod
+            adder = getattr(self.store, "add_contract_feedback", None)
+            if adder is not None:
+                item_by_id = {i.id: i for i in contract.items}
+                for c in checks_out:
+                    if c["status"] != "fail" or not c.get("criterion_id"):
+                        continue
+                    raw = str(c["criterion_id"])
+                    item_id = raw.split(":", 1)[1] if raw.startswith("api:") else raw
+                    item = item_by_id.get(item_id)
+                    if item is None:
+                        continue
+                    expected = item.criterion or (
+                        f"{item.method} {item.path}" if item.kind == "api" else "")
+                    fb = contract_mod.record_feedback(
+                        contract=contract, item_id=item_id, expected=expected,
+                        actual=str(c.get("detail", ""))[:400], phase="qa", run_id=run_id,
+                        severity=str(c.get("severity") or "blocking"), feedback=str(c.get("name", "")))
+                    with contextlib.suppress(Exception):
+                        await adder(fb)
         # Runtime evidence was gathered against the served app (screenshots/smoke/API checks) → verified,
         # UNLESS the harness fully degraded and produced no real checks (crit_total==0 and no screenshots),
         # which the design treats as *unverified*, not healthy (A2).
@@ -2519,23 +2580,100 @@ class RunEngine:
                 payload={"kind": "qa.evidence", **facts["qa_evidence"]},
             )
 
-    async def _acceptance_criteria(self, mission_id: str) -> list:
-        """Best-effort acceptance criteria for the QA harness, parsed from the spec phase output.
-        Fail-soft: returns [] when the spec has no machine-readable ``foundry-criteria`` block."""
-        from .specdoc import extract_criteria
+    async def _spec_text(self, mission_id: str) -> str:
+        """The latest spec-phase output text for a mission, or '' (fail-soft)."""
         try:
             events = await self.store.list_events(mission_id=mission_id, limit=400)
         except Exception:  # noqa: BLE001 — evidence grounding must never break a build
-            return []
+            return ""
         spec_text = ""
         for e in events:  # events are oldest→newest; the latest spec output wins
             payload = getattr(e, "payload", None) or {}
             if payload.get("kind") == "phase.output" and payload.get("phase") == "spec":
                 spec_text = e.text or spec_text
+        return spec_text
+
+    async def _acceptance_criteria(self, mission_id: str) -> list:
+        """Best-effort acceptance criteria for the QA harness, parsed from the spec phase output.
+        Fail-soft: returns [] when the spec has no machine-readable ``foundry-criteria`` block."""
+        from .specdoc import extract_criteria
         try:
+            spec_text = await self._spec_text(mission_id)
             return extract_criteria(spec_text) if spec_text else []
         except Exception:  # noqa: BLE001
             return []
+
+    async def _ensure_contract(self, run_id: str, mission_id: str, mission: Mission):
+        """P1 — the mission's Spec Contract (single source of truth). Parses the spec's UI+API machine
+        blocks into a versioned Contract and persists it once; returns the existing one on later calls.
+        Fail-soft: any problem returns None and never breaks a phase. Requires the store to support
+        contracts (both do)."""
+        from . import contract as contract_mod
+        getter = getattr(self.store, "get_contract", None)
+        upsert = getattr(self.store, "upsert_contract", None)
+        if getter is None or upsert is None:
+            return None
+        try:
+            existing = await getter(mission_id)
+            if existing is not None and existing.items:
+                return existing
+            spec_text = await self._spec_text(mission_id)
+            if not spec_text:
+                return existing
+            parsed = contract_mod.parse_contract(
+                spec_text, mission_id=mission_id, workspace_id=mission.workspace_id,
+                org_id=mission.org_id,
+                version=(existing.version if existing else 1),
+                contract_id=(existing.id if existing else None),
+            )
+            if not parsed.items:
+                return existing
+            saved = await upsert(parsed)
+            run = await self.store.get_run(run_id)
+            if run is not None:
+                ui = sum(1 for i in saved.items if i.kind == "ui")
+                api = sum(1 for i in saved.items if i.kind == "api")
+                await self._emit(run, mission, AgentRoleKey.PM, "spec",
+                                 f"📜 Spec Contract v{saved.version} · {ui} UI + {api} API item(s) — "
+                                 "the single source of truth for build & QA",
+                                 payload={"kind": "contract.ready", "version": saved.version,
+                                          "ui": ui, "api": api})
+            return saved
+        except Exception:  # noqa: BLE001 — contract building is best-effort, never fail a phase
+            return None
+
+    async def _contract_block(self, mission_id: str) -> str:
+        """Render the mission's contract for injection into build/QA/review prompts ('' if none)."""
+        from . import contract as contract_mod
+        getter = getattr(self.store, "get_contract", None)
+        if getter is None:
+            return ""
+        try:
+            return contract_mod.render_contract_md(await getter(mission_id))
+        except Exception:  # noqa: BLE001
+            return ""
+
+    async def _contract_feedback_block(self, mission_id: str) -> str:
+        """The unresolved contract feedback (expected-vs-actual) for the last QA/review pass, so a
+        REWORK build fixes the exact documented failures. '' when there is none (fail-soft)."""
+        get_c = getattr(self.store, "get_contract", None)
+        list_fb = getattr(self.store, "list_contract_feedback", None)
+        if get_c is None or list_fb is None:
+            return ""
+        try:
+            contract = await get_c(mission_id)
+            if contract is None:
+                return ""
+            fb = await list_fb(contract.id)
+            if not fb:
+                return ""
+            recent = fb[-8:]  # the latest findings; bounded
+            lines = ["## QA feedback to fix (from the contract ledger)"]
+            for f in recent:
+                lines.append(f"- [{f.severity}] {f.item_id}: expected {f.expected!r}, got {f.actual!r}")
+            return "\n".join(lines) + "\n\n"
+        except Exception:  # noqa: BLE001
+            return ""
 
     def _over_budget(self, cost_cents: object) -> bool:
         """True when a per-run cost ceiling is set and this run has reached it (Rule 0: 0 = off).
