@@ -75,7 +75,7 @@ def seed_missions() -> list[Mission]:
             ),
             source=MissionSource.JIRA, ext_ref="NPD-11402", priority=Priority.P0,
             stage=MissionStage.BACKLOG, autonomy=AutonomyLevel.SUPERVISED, progress=0,
-            labels=["security", "billing"],
+            labels=["security", "billing"], project_kind="demo",  # the seeded showcase → demo builder
             created_at=_now(), updated_at=_now(),
         ),
         Mission(

@@ -44,6 +44,7 @@ CH_EMAIL = "email"
 CH_TWILIO = "whatsapp_twilio"
 CH_META = "whatsapp_meta"
 CH_SLACK = "slack"
+CH_WA_AGENT = "whatsapp_agent"   # P5 no-tunnel channel — proactive push to the captured user:<id>
 
 _TIMEOUT = 10.0
 
@@ -74,6 +75,31 @@ def _cfg(prefs, key: str, env_name: str, default: str = "") -> str:
     fall back to the legacy ``SHIPWRIGHT_/FOUNDRY_<env_name>`` env var, then the default."""
     value = str((getattr(prefs, "notify_config", None) or {}).get(key) or "").strip()
     return value or _env(env_name, default)
+
+
+def _is_push_reject_gate(blocker) -> bool:
+    """True for the merge re-gate raised after a push was rejected (force-push / different-branch
+    decision), as distinct from the ordinary 'approve to merge' gate."""
+    detail = (getattr(blocker, "detail", "") or "").lower()
+    return "push was rejected" in detail and "force-push" in detail
+
+
+def _wa_session_recipients(prefs) -> list[str]:
+    """Normalized session keys for every WhatsApp recipient a reply might come from — the configured
+    number, allow-listed senders, and the Agent channel's captured ``user:<id>``. De-duplicated."""
+    from .whatsapp_integration import normalize_sender
+    channels = getattr(prefs, "notify_channels", None) or {}
+    cfg = getattr(prefs, "notify_config", None) or {}
+    raw = [getattr(prefs, "notify_whatsapp", "") or ""]
+    raw += (cfg.get("whatsappAllowedSenders") or "").replace(";", ",").split(",")
+    if channels.get(CH_WA_AGENT):
+        raw.append(cfg.get("whatsappAgentRecipient") or "")
+    keys: list[str] = []
+    for r in raw:
+        key = normalize_sender(r)
+        if key and key not in keys:
+            keys.append(key)
+    return keys
 
 
 def clean_header(value: str) -> str:
@@ -150,6 +176,10 @@ class Notifier:
             await self._dispatch(mission, EV_QUESTION, subject=subject, body=body)
             return
         is_approval = blocker.kind == BlockerKind.APPROVAL
+        # A push-rejected re-gate: arm the WhatsApp session so a 'force push' / 'new branch <name>'
+        # reply routes to THIS gate (not the start-mission parser).
+        if is_approval and _is_push_reject_gate(blocker):
+            await self._arm_wa_push_gate(mission, blocker)
         event = EV_APPROVAL if is_approval else EV_BLOCKER
         head = "Approval needed" if is_approval else "Mission blocked"
         subject = f"[{BRAND_NAME}] {head} — {mission.key}: {mission.title}"
@@ -190,6 +220,7 @@ class Notifier:
         senders = {
             CH_EMAIL: self._send_email, CH_TWILIO: self._send_twilio,
             CH_META: self._send_meta, CH_SLACK: self._send_slack,
+            CH_WA_AGENT: self._send_wa_agent,
         }
         for key, fn in senders.items():
             if not channels.get(key, False):
@@ -221,6 +252,11 @@ class Notifier:
                         and (getattr(prefs, "notify_whatsapp", "") or "").strip())
         if key == CH_SLACK:
             return bool(_cfg(prefs, "slackWebhook", "SLACK_WEBHOOK"))
+        if key == CH_WA_AGENT:
+            # Ready once the key is set AND the channel has learned a recipient from an inbound message.
+            cfg = getattr(prefs, "notify_config", None) or {}
+            return bool(str(cfg.get("whatsappAgentKey") or "").strip()
+                        and str(cfg.get("whatsappAgentRecipient") or "").strip())
         return False
 
     # ---- dispatch ---------------------------------------------------------------
@@ -242,6 +278,7 @@ class Notifier:
             CH_TWILIO: lambda: self._send_twilio(prefs, subject, body),
             CH_META: lambda: self._send_meta(prefs, subject, body),
             CH_SLACK: lambda: self._send_slack(prefs, subject, body, slack_blocks),
+            CH_WA_AGENT: lambda: self._send_wa_agent(prefs, subject, body),
         }
         for key, make in senders.items():
             if not channels.get(key, False):
@@ -261,12 +298,16 @@ class Notifier:
         try:
             prefs = await self._store.get_settings(mission.workspace_id)
             channels = getattr(prefs, "notify_channels", None) or {}
-            if not (channels.get(CH_TWILIO) or channels.get(CH_META)):
+            if not (channels.get(CH_TWILIO) or channels.get(CH_META) or channels.get(CH_WA_AGENT)):
                 return  # no WhatsApp channel → nothing to arm
             from .whatsapp_integration import normalize_sender
             recipients = [getattr(prefs, "notify_whatsapp", "") or ""]
             cfg = getattr(prefs, "notify_config", None) or {}
             recipients += (cfg.get("whatsappAllowedSenders") or "").replace(";", ",").split(",")
+            # The Agent channel keys its session by the digits of the captured user:<id> (normalize_sender),
+            # so arming under that key lets a reply in the Agent chat resolve this question.
+            if channels.get(CH_WA_AGENT):
+                recipients.append(cfg.get("whatsappAgentRecipient") or "")
             questions = []
             detail = (blocker.detail or "").strip()
             if detail.startswith("{"):
@@ -291,6 +332,33 @@ class Notifier:
                 ))
         except Exception as exc:  # noqa: BLE001 — arming is best-effort, never fail a run
             log.warning("notify.arm_wa_failed", error=str(exc))
+
+    async def _arm_wa_push_gate(self, mission: Mission, blocker: Blocker) -> None:
+        """Put the WhatsApp recipients' sessions into AWAITING_PUSH_DECISION for this push-rejected gate,
+        so a plain reply ('force push' / 'new branch <name>') resolves it. Best-effort; never raises."""
+        upsert = getattr(self._store, "upsert_wa_session", None)
+        if upsert is None:
+            return
+        try:
+            prefs = await self._store.get_settings(mission.workspace_id)
+            channels = getattr(prefs, "notify_channels", None) or {}
+            if not (channels.get(CH_TWILIO) or channels.get(CH_META) or channels.get(CH_WA_AGENT)):
+                return  # no WhatsApp channel → nothing to arm
+            from foundry_core.ids import new_ulid
+            from foundry_core.models import WaSession
+            now = _dt.datetime.now(_dt.UTC)
+            for key in _wa_session_recipients(prefs):
+                existing = None
+                with contextlib.suppress(Exception):
+                    existing = await self._store.get_wa_session(mission.workspace_id, key)
+                await upsert(WaSession(
+                    id=(existing.id if existing else new_ulid()),
+                    workspace_id=mission.workspace_id, sender=key, state="awaiting_push_decision",
+                    context={"mission_key": mission.key, "blocker_id": blocker.id},
+                    updated_at=now, expires_at=now + _dt.timedelta(seconds=1800),
+                ))
+        except Exception as exc:  # noqa: BLE001 — arming is best-effort, never fail a run
+            log.warning("notify.arm_push_failed", error=str(exc))
 
     @staticmethod
     def _blocker_detail(blocker: Blocker) -> str:
@@ -344,6 +412,20 @@ class Notifier:
                 },
             )
             resp.raise_for_status()
+
+    async def _send_wa_agent(self, prefs, subject: str, body: str) -> None:
+        """Proactively push over the P5 WhatsApp Agent Platform channel to the ``user:<id>`` the channel
+        learned from the creator's inbound message (``notify_config.whatsappAgentRecipient``). No-op until
+        both the key and a captured recipient exist. Privacy: the body carries only the mission key + short
+        ask (this channel is NOT end-to-end encrypted) — never secrets/diffs."""
+        cfg = getattr(prefs, "notify_config", None) or {}
+        key = str(cfg.get("whatsappAgentKey") or "").strip()
+        to = str(cfg.get("whatsappAgentRecipient") or "").strip()
+        if not (key and to):
+            return
+        from . import wa_agent_channel  # lazy import: avoids any import cycle; monkeypatch-friendly
+        async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
+            await wa_agent_channel.send_text(cfg, to, f"{subject}\n\n{body}", client=client)
 
     async def _send_slack(self, prefs, subject: str, body: str, blocks: list | None = None) -> None:
         webhook = normalize_url(_cfg(prefs, "slackWebhook", "SLACK_WEBHOOK"))

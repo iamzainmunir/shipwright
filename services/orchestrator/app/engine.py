@@ -546,7 +546,7 @@ class RunEngine:
             id=new_ulid(), key=key, org_id=DEMO_ORG, workspace_id=ws, title=title,
             summary="", source=MissionSource.MANUAL, priority=Priority.P2,
             stage=MissionStage.BACKLOG, autonomy=auto, progress=0, labels=[],
-            requirements=brief,
+            requirements=brief, project_kind="app",  # greenfield: build the brief, not the seeded demo
         )
         await self.store.add_mission(mission)
         await self.start_run(mission)
@@ -1424,8 +1424,7 @@ class RunEngine:
         await self._emit(run, mission, role, "review",
                          f"🙋 Needs your attention: {message}",
                          payload={"kind": "needs.user", "phase": "review"})
-        await self._fail(run_id, mission_id, message)
-        await self._notifier.on_failed(mission, message)  # email/WhatsApp/Slack (failure-isolated)
+        await self._fail(run_id, mission_id, message)  # _fail now sends the failure notification itself
         if (m := await self.store.get_mission(mission_id)) is not None and m.stage is not MissionStage.SHIPPED:
             await self.store.update_mission(mission_id, stage=MissionStage.STOPPED, is_blocked=False)
         return _HALT
@@ -1707,6 +1706,22 @@ class RunEngine:
         if not providers:
             providers.append(await self._active_provider())
         return providers
+
+    @staticmethod
+    def _build_route(mission: Mission) -> str:
+        """Which builder a mission uses:
+        - ``"demo"``  — the seeded showcase ONLY (``devloop.real_build``: a canned tenant-isolation
+          fixture + a fixed task). Reachable solely via an explicit ``project_kind="demo"``.
+        - ``"change"`` — edit an existing repo on a ``fix/`` branch (needs a ``project_path``).
+        - ``"app"``   — greenfield build from the mission's own brief. This is the DEFAULT for any real
+          mission (dashboard, WhatsApp, email), so a missing/unknown ``project_kind`` never drops into
+          the demo path (the M-186 off-mission-rework bug)."""
+        kind = _enum_value(mission.project_kind)
+        if kind == "demo":
+            return "demo"
+        if kind == "change" and bool(mission.project_path):
+            return "change"
+        return "app"
 
     @staticmethod
     def _is_solo(mission: Mission) -> bool:
@@ -2308,9 +2323,10 @@ class RunEngine:
         # The build runs on the team's Backend agent's models, in order — if the first model errors
         # mid-build we fail over to the next (same policy as the reasoning phases).
         providers = await self._resolve_providers(mission, phase.role)
-        kind = _enum_value(mission.project_kind)
-        is_app = kind == "app"
-        is_change_repo = kind == "change" and bool(mission.project_path)
+        # Greenfield ('app') is the default; the demo builder is reachable ONLY via project_kind="demo".
+        route = self._build_route(mission)
+        is_app = route == "app"
+        is_change_repo = route == "change"
         # Record where the deliverable lives BEFORE the (slow) build so the Details rail shows the
         # project folder immediately instead of only after the build finishes.
         if is_app and not mission.project_path:
@@ -3149,6 +3165,10 @@ class RunEngine:
             await self._reset_agents_idle(mission.workspace_id)
             await self._emit(run, mission, AgentRoleKey.DEVOPS, "error", f"Run failed: {message}",
                              payload={"kind": "run.failed"})
+            # Alert the workspace's channels on EVERY failure — escalation, provider/engine error, or
+            # human-halt — not just some paths. _fail is the single terminal-failure funnel, so notifying
+            # here guarantees no failure is silent (email/WhatsApp/Slack, failure-isolated in the notifier).
+            await self._notifier.on_failed(mission, message)
             # A failed run is the MOST instructive outcome — reflect on it so it teaches (audit A11).
             from . import reflection
             with contextlib.suppress(Exception):

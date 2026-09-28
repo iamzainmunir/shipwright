@@ -32,6 +32,7 @@ class WaState(StrEnum):
     AWAITING_CONFIRM = "awaiting_confirm"   # a destructive action is staged; waiting for confirm/abort
     AWAITING_ANSWER = "awaiting_answer"     # the AI asked clarifying questions; next text is the answer
     DRAFTING_MISSION = "drafting_mission"   # user said "start" with no brief; waiting for the brief
+    AWAITING_PUSH_DECISION = "awaiting_push_decision"  # a push was rejected; want 'force push' / 'new branch'
 
 
 @dataclass
@@ -72,6 +73,21 @@ _ABORT_PHRASES = frozenset({"abort", "nevermind", "never mind", "cancel that", "
 _LIST_TARGETS = {"teams": "teams", "agents": "agents", "skills": "skills",
                  "models": "models", "missions": "missions"}
 
+# Push-rejected gate vocabulary (only meaningful in AWAITING_PUSH_DECISION).
+_FORCE_WORDS = ("force", "overwrite")  # substring match: "force push", "force-push", "overwrite it"
+# A branch name after "branch" (optionally "called"/"named"); "" when the user just says "new branch".
+_BRANCH_NAME_RE = re.compile(r"branch\s+(?:called\s+|named\s+)?([A-Za-z0-9][\w./-]*)", re.I)
+_BRANCH_NAME_STOPWORDS = frozenset({"please", "instead", "now", "it", "and", "then", "to"})
+
+
+def _branch_name(text: str) -> str:
+    """Pull an explicit branch name out of 'new branch <name>' / 'branch called <name>', else ''."""
+    match = _BRANCH_NAME_RE.search(text or "")
+    if not match:
+        return ""
+    name = match.group(1)
+    return "" if name.lower() in _BRANCH_NAME_STOPWORDS else name
+
 _HELP_TEXT = (
     f"{BRAND_NAME} on WhatsApp — what I understand:\n"
     "• start <brief> — kick off a mission (I'll ask you to confirm)\n"
@@ -81,6 +97,7 @@ _HELP_TEXT = (
     "• missions — list your missions\n"
     "• mission <KEY> — details on one\n"
     "• approve <KEY> / reject <KEY> — decide an open gate\n"
+    "• (if a push is rejected) 'force push' or 'new branch <name>'\n"
     "• teams · team <name> — your teams / one team's members\n"
     "• agents · agent <name> — your agents / one agent's role, skills, model\n"
     "• skills · models — the skill library / model connections\n"
@@ -142,6 +159,23 @@ def parse_intent(text: str, session: WaSessionState) -> Intent:
         if low in _ABORT_PHRASES or low in _CANCEL_WORDS:
             return Intent("abort")
         return Intent("start", {"brief": raw})
+
+    if session.state == WaState.AWAITING_PUSH_DECISION:
+        # A push was rejected; we asked the user to authorize a force-push or push a different branch.
+        # Here 'create/new branch' is a GATE decision, never a new mission (help/abort still escape).
+        ctx = {"mission_key": session.context.get("mission_key"),
+               "blocker_id": session.context.get("blocker_id")}
+        if low in _HELP_WORDS:
+            return Intent("help")
+        if low in _ABORT_PHRASES or low in _CANCEL_WORDS:
+            return Intent("abort")
+        if any(w in low for w in _FORCE_WORDS):
+            return Intent("push_decision", {**ctx, "mode": "force"})
+        if "branch" in low:
+            return Intent("push_decision", {**ctx, "mode": "branch", "branch": _branch_name(raw)})
+        if low in _REJECT_WORDS:
+            return Intent("reject", {"mission_key": ctx["mission_key"]})
+        return Intent("push_ambiguous", ctx)  # re-prompt with the two options; stay armed
 
     # --- default (IDLE) grammar ---------------------------------------------------
     parts = low.split()
@@ -273,6 +307,19 @@ def advance(session: WaSessionState, intent: Intent) -> tuple[str, dict | None]:
 
     if kind == "reject":
         return "Rejecting…", {"do": "reject", "mission_key": args.get("mission_key")}
+
+    if kind == "push_decision":
+        ctx = {"mission_key": args.get("mission_key"), "blocker_id": args.get("blocker_id")}
+        _reset(session)
+        if args.get("mode") == "force":
+            return "Authorizing a force-push…", {"do": "push_decision", "mode": "force", "branch": "", **ctx}
+        return ("Pushing to a new branch…",
+                {"do": "push_decision", "mode": "branch", "branch": args.get("branch", ""), **ctx})
+
+    if kind == "push_ambiguous":
+        # Stay armed (no reset) and re-offer the two safe choices.
+        return ("The push to that branch was rejected. Reply 'force push' to overwrite it, or "
+                "'new branch <name>' to push a fresh branch instead. (Or 'abort' to leave it.)", None)
 
     if kind == "retry":
         return "Retrying…", {"do": "retry", "mission_key": args.get("mission_key")}

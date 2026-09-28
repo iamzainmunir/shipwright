@@ -23,7 +23,38 @@ from typing import Any
 
 from foundry_core.enums import ApprovalDecision, BlockerKind
 
+from .seed import DEMO_WS
+
 _GENERIC_ERROR = "Sorry, something went wrong handling that."
+
+# Board columns in reading order → friendly labels, for the WhatsApp ticket breakdown.
+_TICKET_COLUMNS: list[tuple[str, str]] = [
+    ("todo", "To Do"), ("reopened", "Reopened"), ("in_progress", "In Progress"),
+    ("in_review", "In Review"), ("qa", "QA"), ("blocked", "Blocked"), ("done", "Done"),
+]
+
+
+def _ticket_breakdown(tickets: list[Any]) -> str:
+    """A compact 'how many To Do / In Progress / QA / Done' string, empty when there are no tickets."""
+    counts: dict[str, int] = {}
+    for t in tickets:
+        status = getattr(getattr(t, "status", None), "value", None) or str(getattr(t, "status", ""))
+        counts[status] = counts.get(status, 0) + 1
+    parts = [f"{counts[val]} {label}" for val, label in _TICKET_COLUMNS if counts.get(val)]
+    return " · ".join(parts)
+
+
+async def _safe_tickets(store: Any, *, mission_id: str | None = None, workspace_id: str) -> list[Any]:
+    """Best-effort ticket fetch — a store without ``list_tickets`` (or a hiccup) yields ``[]``, never raises."""
+    fn = getattr(store, "list_tickets", None)
+    if fn is None:
+        return []
+    try:
+        if mission_id is not None:
+            return list(await fn(mission_id=mission_id, workspace_id=workspace_id))
+        return list(await fn(workspace_id=workspace_id))
+    except Exception:  # noqa: BLE001 — status is read-only + failure-isolated
+        return []
 
 
 async def execute(
@@ -44,6 +75,8 @@ async def execute(
             return await _do_decision(
                 action, store=store, engine=engine, actor=actor, workspace_id=workspace_id
             )
+        if do == "push_decision":
+            return await _do_push_decision(action, engine=engine, actor=actor)
         if do == "status":
             return await _do_status(store=store, workspace_id=workspace_id)
         if do == "missions":
@@ -155,6 +188,28 @@ async def _do_decision(
     return f"{'✅ Approved' if approve else '🛑 Rejected'} {label}."
 
 
+async def _do_push_decision(action: dict, *, engine: Any, actor: str) -> str:
+    """Resolve a push-rejected merge gate the way the user chose in chat: 'force push' (overwrite the
+    branch — an explicit, human-authorized force) or 'new branch <name>' (push a fresh branch, safe)."""
+    blocker_id = action.get("blocker_id")
+    if not blocker_id:
+        return "I don't have an open push gate for you right now."
+    resolver = getattr(engine, "resolve_blocker", None)
+    if resolver is None:
+        return "Can't record that decision right now."
+    key = action.get("mission_key") or "the mission"
+    force = action.get("mode") == "force"
+    branch = (action.get("branch") or "").strip()
+    if not force and not branch:
+        # No name given → generate a fresh, non-colliding branch so we never touch the base branch.
+        branch = f"shipwright/{str(action.get('mission_key') or 'mission').lower()}"
+    await resolver(blocker_id, ApprovalDecision.APPROVE, actor=actor, note=f"via {actor}",
+                   branch=(branch or None), force=force)
+    if force:
+        return f"⚠️ Authorized a force-push for {key} — overwriting the branch."
+    return f"✅ Pushing {key} to a new branch '{branch}' and opening a PR."
+
+
 async def _do_status(*, store: Any, workspace_id: str) -> str:
     missions = await _safe_list_missions(store, workspace_id)
     if missions is None:
@@ -166,7 +221,10 @@ async def _do_status(*, store: Any, workspace_id: str) -> str:
         stage = _stage_of(mission)
         counts[stage] = counts.get(stage, 0) + 1
     breakdown = ", ".join(f"{n} {stage}" for stage, n in sorted(counts.items()))
-    return f"{len(missions)} mission(s): {breakdown}."
+    tickets = await _safe_tickets(store, workspace_id=workspace_id)
+    bd = _ticket_breakdown(tickets)
+    ticket_line = f" Tickets: {bd}." if bd else ""
+    return f"{len(missions)} mission(s): {breakdown}.{ticket_line}"
 
 
 async def _do_missions(*, store: Any, workspace_id: str) -> str:
@@ -191,7 +249,11 @@ async def _do_mission(action: dict, *, store: Any) -> str:
     title = (getattr(mission, "title", "") or "").strip()
     progress = getattr(mission, "progress", None)
     tail = f" — {progress}%" if isinstance(progress, int) else ""
-    return f"{label} — {_stage_of(mission)}{tail}{(' — ' + title) if title else ''}"
+    base = f"{label} — {_stage_of(mission)}{tail}{(' — ' + title) if title else ''}"
+    tickets = await _safe_tickets(store, mission_id=getattr(mission, "id", None),
+                                  workspace_id=getattr(mission, "workspace_id", "") or DEMO_WS)
+    bd = _ticket_breakdown(tickets)
+    return base + (f"\nTickets: {bd}" if bd else "")
 
 
 # --- read-only org views (Tier 1) -----------------------------------------------

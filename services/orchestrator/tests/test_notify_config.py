@@ -34,6 +34,15 @@ def test_blank_secret_does_not_wipe():
     assert client.get("/api/v1/settings").json()["notifyConfig"]["slackWebhookSet"] is True
 
 
+def test_agent_recipient_is_redacted_not_leaked():
+    # The Agent recipient is an opaque, privacy-sensitive user:<id> captured server-side — the API must
+    # never render it, only signal (via ...Set) that proactive alerts can reach the user.
+    r = client.patch("/api/v1/settings", json={"notifyConfig": {"whatsappAgentRecipient": "user:opaque123"}})
+    cfg = r.json()["notifyConfig"]
+    assert cfg.get("whatsappAgentRecipient") is None
+    assert cfg.get("whatsappAgentRecipientSet") is True
+
+
 def test_cfg_prefers_db_over_env(monkeypatch):
     monkeypatch.setenv("SHIPWRIGHT_SLACK_WEBHOOK", "https://env-webhook")
     assert _cfg(SimpleNamespace(notify_config={"slackWebhook": "https://db-webhook"}),

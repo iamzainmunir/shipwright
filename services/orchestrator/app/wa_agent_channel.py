@@ -109,11 +109,19 @@ def _text_messages(updates: dict) -> list[dict]:
     return out
 
 
-async def _persist_offset(store, cfg: dict, next_offset: str) -> None:
-    """Persist the cursor in notify_config so restarts resume with no missed/replayed messages."""
+async def _persist_agent_state(store, cfg: dict, *, next_offset: str | None = None,
+                               recipient: str | None = None) -> None:
+    """Persist the channel's mutable state in notify_config: the long-poll ``offset`` cursor (so restarts
+    resume with no missed/replayed messages) and the creator's ``recipient`` ``user:<id>`` (so the notifier
+    can proactively push blockers/approvals/questions back to that same chat)."""
+    if next_offset is None and not recipient:
+        return
     with contextlib.suppress(Exception):
         merged = dict(cfg)
-        merged["whatsappAgentOffset"] = next_offset
+        if next_offset is not None:
+            merged["whatsappAgentOffset"] = next_offset
+        if recipient:
+            merged["whatsappAgentRecipient"] = recipient
         await store.update_settings(notify_config=merged)
 
 
@@ -133,10 +141,12 @@ async def poll_once(store, engine, *, client: httpx.AsyncClient) -> str | None:
     if not updates:
         return None
     last_send = 0.0
+    recipient: str | None = None
     for msg in _text_messages(updates):
         sender = str(msg.get("from") or "")
         if not sender.startswith("user:"):
             continue  # only converse with the creator's user:<id>
+        recipient = sender  # remember where to reach them for proactive alerts
         body = str((msg.get("text") or {}).get("body") or "")
         if not body:
             with contextlib.suppress(Exception):
@@ -156,10 +166,10 @@ async def poll_once(store, engine, *, client: httpx.AsyncClient) -> str | None:
             await send_text(cfg, sender, reply, context_id=msg.get("id"), client=client)
         last_send = asyncio.get_event_loop().time()
     next_offset = updates.get("next_offset")
-    if next_offset is not None:
-        await _persist_offset(store, cfg, str(next_offset))
-        return str(next_offset)
-    return None
+    await _persist_agent_state(store, cfg,
+                               next_offset=(str(next_offset) if next_offset is not None else None),
+                               recipient=recipient)
+    return str(next_offset) if next_offset is not None else None
 
 
 async def run_forever(store, engine) -> None:
